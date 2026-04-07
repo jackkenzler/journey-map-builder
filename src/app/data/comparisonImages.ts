@@ -42,3 +42,32 @@ export const comparisonImages: Record<number, { before: string; after: string }>
   11: { before: step12Before, after: step12After },  // Payment reminder email
   12: { before: step13Before, after: step13After },  // Pays tuition
 };
+
+export const comparisonImageAssetsByFilename: Record<string, string> = {
+  'step-01-landing-pages-before.jpg': step01Before,
+  'step-01-landing-pages-after.jpg': step01After,
+  'step-02-class-search-link-before.jpg': step02Before,
+  'step-02-class-search-link-after.jpg': step02After,
+  'step-03-signin-to-continue-before.jpg': step03Before,
+  'step-03-signin-to-continue-after.jpg': step03After,
+  'step-04-unified-application-before.jpg': step04Before,
+  'step-04-unified-application-after.jpg': step04After,
+  'step-05-next-steps-comms-before.jpg': step05Before,
+  'step-05-next-steps-comms-after.jpg': step05After,
+  'step-06-applies-for-class-before.jpg': step06Before,
+  'step-06-applies-for-class-after.jpg': step06After,
+  'step-07-submits-app-before.jpg': step07Before,
+  'step-07-submits-app-after.jpg': step07After,
+  'step-08-next-steps-comms-before.jpg': step08Before,
+  'step-08-next-steps-comms-after.jpg': step08After,
+  'step-09-track-application-status-before.jpg': step09Before,
+  'step-09-track-application-status-after.jpg': step09After,
+  'step-10-admission-dec-comms-before.jpg': step10Before,
+  'step-10-admission-dec-comms-after.jpg': step10After,
+  'step-11-seamless-registration-before.jpg': step11Before,
+  'step-11-seamless-registration-after.jpg': step11After,
+  'step-12-payment-reminder-comms-before.jpg': step12Before,
+  'step-12-payment-reminder-comms-after.jpg': step12After,
+  'step-13-tuition-payment-before.jpg': step13Before,
+  'step-13-tuition-payment-after.jpg': step13After,
+};

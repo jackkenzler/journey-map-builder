@@ -6,59 +6,13 @@ import emailIcon from '../../../emailIcon-2.svg';
 import { PlatformModal } from './PlatformModal';
 import { GuidedTourPopover } from './GuidedTourPopover';
 import { journeyStages } from '../data/journeyData';
-import { comparisonImages } from '../data/comparisonImages';
+import { comparisonImageAssetsByFilename } from '../data/comparisonImages';
+import type { JourneyMapProject } from '../../builder';
+import { asuNondegreeProject } from '../../builder';
+import { loadDraftProject } from '../../builder/draftStorage';
 
 // The road path — extended well beyond edges so it bleeds off-screen
 const ROAD_PATH = "M-800 438H254.925C327.274 438 385.925 379.349 385.925 307V143.038C385.925 72.8767 442.801 16 512.962 16C583.123 16 640 72.8767 640 143.038V457.203C640 527.231 696.769 584 766.797 584C836.825 584 893.594 527.231 893.594 457.203V253C893.594 180.651 952.245 122 1024.59 122H2100";
-
-// Current state: 10 pain point markers, distributed across visible path range
-const currentStateMarkers: CurrentStateMarker[] = [
-  { desktopPct: 0.22, mobilePct: 0.22, label: 'No direct\u00a0path from\nClass\u00a0Search to application', side: 'above' },
-  { desktopPct: 0.27, mobilePct: 0.25, label: 'Landing\u00a0pages with\npolicy\u00a0contradictions', side: 'below' },
-  { desktopPct: 0.35, mobilePct: 0.32, label: 'Two\u00a0applications\ncreates\nconfusion', side: 'left' },
-  { desktopPct: 0.43, mobilePct: 0.46, label: 'Non-essential\u00a0questions\nin\nthe app', side: 'right' },
-  { desktopPct: 0.475, mobilePct: 0.49, label: 'Cannot\u00a0reserve a seat\nbefore\u00a0registering', side: 'left' },
-  { desktopPct: 0.52, mobilePct: 0.53, label: '"Pay\u00a0later" option\ncreates confusion\nand delays', side: 'left' },
-  { desktopPct: 0.64, mobilePct: 0.64, label: 'Unpredictable\u00a0admission\ntimeline', side: 'right' },
-  { desktopPct: 0.67, mobilePct: 0.68, label: 'Class\u00a0could\u00a0fill\u00a0up\nwhile\u00a0waiting', side: 'right' },
-  { desktopPct: 0.74, mobilePct: 0.74, label: 'Able\u00a0to\u00a0add\u00a0courses\nnot\u00a0eligible\u00a0to\u00a0enroll\u00a0in', side: 'above' },
-  { desktopPct: 0.80, mobilePct: 0.78, label: 'Unclear\u00a0how\u00a0much\nthe\u00a0class\u00a0will\u00a0cost', side: 'below' },
-];
-
-// Future state: 13 step dots, distributed across visible path range
-const futureStateMarkers: FutureStateMarker[] = [
-  { desktopPct: 0.22, mobilePct: 0.22, label: 'Consistent policies\non landing pages', side: 'above', stageIdx: 0, stepIdx: 0 },
-  { desktopPct: 0.255, mobilePct: 0.235, label: 'Finds a class to\nenroll in', side: 'below', stageIdx: 0, stepIdx: 1 },
-  { desktopPct: 0.31, mobilePct: 0.285, label: 'Signs in\nto apply', side: 'left', stageIdx: 1, stepIdx: 0 },
-  { desktopPct: 0.34, mobilePct: 0.315, label: 'Starts\napplication', side: 'left', stageIdx: 1, stepIdx: 1 },
-  { desktopPct: 0.45, mobilePct: 0.35, label: 'App\u00a0started\nemail', side: 'left', stageIdx: 1, stepIdx: 2 },
-  { desktopPct: 0.48, mobilePct: 0.4575, label: 'Confirms\nclass', side: 'left', stageIdx: 1, stepIdx: 3 },
-  { desktopPct: 0.52, mobilePct: 0.49, label: 'Submits app\nand pays fee', side: 'left', stageIdx: 1, stepIdx: 4 },
-  { desktopPct: 0.63, mobilePct: 0.52, label: 'App submitted\nemail', side: 'right', stageIdx: 1, stepIdx: 5 },
-  { desktopPct: 0.655, mobilePct: 0.64, label: 'Tracks application\nstatus', side: 'right', stageIdx: 2, stepIdx: 0 },
-  { desktopPct: 0.68, mobilePct: 0.70, label: 'Admission\u00a0decision\nemail', side: 'left', stageIdx: 2, stepIdx: 1 },
-  { desktopPct: 0.715, mobilePct: 0.73, label: 'Completes\u00a0enrollment\nin class', side: 'above', stageIdx: 3, stepIdx: 0 },
-  { desktopPct: 0.75, mobilePct: 0.76, label: 'Payment\u00a0reminder\nemail', side: 'below', stageIdx: 4, stepIdx: 0 },
-  { desktopPct: 0.79, mobilePct: 0.79, label: 'Pays tuition', side: 'above', stageIdx: 4, stepIdx: 1 },
-];
-
-const stageColors = ['#78BE20', '#00A3E0', '#FF7F32', '#E74973', '#FFC627'];
-
-const currentSummaryData = [
-  { num: '01', name: 'Research', color: '#78be20', desc: 'Prospective students find non-degree options via Google, admissions site, or course search. They browse and decide whether to start with a class or the application.' },
-  { num: '02', name: 'Apply', color: '#00a3e0', desc: 'Students create accounts, navigate branching questions, complete biographical and academic history sections, and submit applications with payment.' },
-  { num: '03', name: 'Decision', color: '#ff7f32', desc: 'Students await system review and propagation, receive admit emails, and become registration eligible — often with no clear timeline or next steps.' },
-  { num: '04', name: 'Register', color: '#e74973', desc: 'Students search and add courses, navigate eligibility confusion and seat availability uncertainty, then click through to register or enroll.' },
-  { num: '05', name: 'Tuition', color: '#ffc627', desc: 'Students navigate to the Finances tab in MyASU and pay tuition — often with confusion about amounts, timing, and payment options.' },
-];
-
-const futureSummaryData = [
-  { num: '01', name: 'Research', color: '#78be20', desc: 'Students discover non-degree options through consistent, well-connected pathways with clear policies and direct links from class search to the application.' },
-  { num: '02', name: 'Apply', color: '#00a3e0', desc: 'A single, unified application guides students through only essential questions with clear next steps and the ability to reserve a class seat upfront.' },
-  { num: '03', name: 'Decision', color: '#ff7f32', desc: 'Students receive timely communications with predictable timelines and clear next steps, reducing anxiety and uncertainty during the waiting period.' },
-  { num: '04', name: 'Register', color: '#e74973', desc: 'Students sign into MyASU with a clear priority task, find their course, and register seamlessly without eligibility confusion or dead ends.' },
-  { num: '05', name: 'Tuition', color: '#ffc627', desc: 'Students see clear cost breakdowns upfront in MyASU with transparent payment options and no confusion about amounts or timing.' },
-];
 
 // Label offset for future state step dots
 const LABEL_OFFSET = 32;
@@ -93,6 +47,11 @@ interface CurrentStateMarker {
   mobilePct: number;
   label: string;
   side: LabelSide;
+  mobileSide: LabelSide;
+  labelVariant: 'plain' | 'card' | 'interactive-card';
+  icon?: 'warning' | 'email';
+  desktopLabel?: MobileFutureLabelConfig;
+  mobileLabel?: MobileFutureLabelConfig;
 }
 
 interface MobileCurrentLabelConfig {
@@ -104,46 +63,38 @@ interface FutureStateMarker {
   mobilePct: number;
   label: string;
   side: LabelSide;
+  mobileSide: LabelSide;
+  labelVariant: 'plain' | 'card' | 'interactive-card';
+  icon?: 'warning' | 'email';
+  desktopLabel?: MobileFutureLabelConfig;
+  mobileLabel?: MobileFutureLabelConfig;
+  beforeImage?: string;
+  afterImage?: string;
   stageIdx: number;
   stepIdx: number;
 }
-
-const MOBILE_FUTURE_LABEL_CONFIGS: Record<number, MobileFutureLabelConfig> = {
-  0: { side: 'right', distance: 30, maxWidth: 230, shiftY: -6 },
-  1: { side: 'right', distance: 30, maxWidth: 240, shiftY: 2 },
-  2: { side: 'above', distance: 30, maxWidth: 200 },
-  3: { side: 'above', distance: 30, maxWidth: 200, shiftX: 6 },
-  4: { side: 'above', distance: 30, maxWidth: 220, shiftX: -10 },
-  5: { side: 'above', distance: 30, maxWidth: 180, shiftX: 8 },
-  6: { side: 'above', distance: 30, maxWidth: 220, shiftX: 12 },
-  7: { side: 'above', distance: 30, maxWidth: 180, shiftX: -8 },
-  8: { side: 'above', distance: 30, maxWidth: 220, shiftX: 12 },
-  9: { side: 'above', distance: 30, maxWidth: 320, shiftX: -20 },
-  10: { side: 'left', distance: 30, maxWidth: 320 },
-  11: { side: 'left', distance: 30, maxWidth: 320 },
-  12: { side: 'left', distance: 30, maxWidth: 180 },
-};
-
-const MOBILE_CURRENT_LABEL_CONFIGS: Record<number, MobileCurrentLabelConfig> = {
-  1: { side: 'right' },
-  2: { side: 'above' },
-  3: { side: 'above' },
-  4: { side: 'above' },
-  5: { side: 'above' },
-  6: { side: 'above' },
-  7: { side: 'above' },
-  8: { side: 'left' },
-  9: { side: 'left' },
-};
 
 interface SelectedStep {
   stageIdx: number;
   stepIdx: number;
   label: string;
   markerIndex: number;
+  beforeImg?: string;
+  afterImg?: string;
 }
 
-export function JourneyMap() {
+interface JourneyMapProps {
+  projectOverride?: JourneyMapProject;
+}
+
+export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
+  const [activeProject] = useState(
+    () =>
+      projectOverride ??
+      loadDraftProject(asuNondegreeProject.organization.slug, asuNondegreeProject.map.slug) ??
+      asuNondegreeProject,
+  );
+  const activeMap = activeProject.map;
   const [journeyState, setJourneyState] = useState<JourneyState>('future');
   const [markersTransitioning, setMarkersTransitioning] = useState(false);
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
@@ -164,6 +115,54 @@ export function JourneyMap() {
   const roadRef = useRef<SVGPathElement>(null);
   const dashRef = useRef<SVGPathElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const stageColors = activeMap.theme.stageColors;
+  const stateLabels = activeMap.stateLabels ?? { current: 'Current state', future: 'Future state' };
+  const currentSummaryData = activeMap.currentSummaries.map((stage) => ({
+    num: stage.number,
+    name: stage.name,
+    color: stage.color,
+    desc: stage.description,
+  }));
+  const futureSummaryData = activeMap.futureSummaries.map((stage) => ({
+    num: stage.number,
+    name: stage.name,
+    color: stage.color,
+    desc: stage.description,
+  }));
+  const currentStateMarkers: CurrentStateMarker[] = activeMap.currentStateMarkers.map((marker) => ({
+    desktopPct: marker.desktop.pct,
+    mobilePct: marker.mobile.pct,
+    label: marker.label,
+    side: marker.desktop.side,
+    mobileSide: marker.mobile.side,
+    labelVariant: marker.labelVariant ?? 'plain',
+    icon: marker.icon,
+    desktopLabel: marker.desktopLabel,
+    mobileLabel: marker.mobileLabel,
+  }));
+  const stageIdxById = new Map(activeMap.stages.map((stage, index) => [stage.id, index]));
+  const stepCountsByStageId = new Map<string, number>();
+  const futureStateMarkers: FutureStateMarker[] = activeMap.futureStateMarkers.map((marker) => {
+    const stageIdx = stageIdxById.get(marker.stageId) ?? 0;
+    const stepIdx = stepCountsByStageId.get(marker.stageId) ?? 0;
+    stepCountsByStageId.set(marker.stageId, stepIdx + 1);
+
+    return {
+      desktopPct: marker.desktop.pct,
+      mobilePct: marker.mobile.pct,
+      label: marker.label,
+      side: marker.desktop.side,
+      mobileSide: marker.mobile.side,
+      labelVariant: marker.labelVariant ?? 'interactive-card',
+      icon: marker.icon,
+      desktopLabel: marker.desktopLabel,
+      mobileLabel: marker.mobileLabel,
+      beforeImage: marker.beforeImage,
+      afterImage: marker.afterImage,
+      stageIdx,
+      stepIdx,
+    };
+  });
 
   const scaleX = containerWidth / BASE_WIDTH;
   const isMobileLayout = viewportWidth < MOBILE_BREAKPOINT;
@@ -177,26 +176,31 @@ export function JourneyMap() {
   const mobileRoadStartX = isMobileLayout ? (containerWidth - mobileTrackWidth) / 2 : 0;
   const labelOffset = isMobileLayout ? 44 : LABEL_OFFSET;
   const summaryGap = isMobileLayout ? 18 : 30;
+  const features = activeMap.features;
+  const availableStates = ([
+    features.currentStateEnabled ? 'current' : null,
+    features.futureStateEnabled ? 'future' : null,
+  ].filter(Boolean) as JourneyState[]);
 
   const getResponsiveSide = (defaultSide: LabelSide, index: number) => {
     if (!isMobileLayout) return defaultSide;
     return index % 2 === 0 ? 'right' : 'left';
   };
 
-  const getFutureMobileLabelConfig = (index: number, defaultSide: LabelSide) => {
+  const getFutureMobileLabelConfig = (marker: FutureStateMarker, index: number, defaultSide: LabelSide) => {
     if (!isMobileLayout) {
       return {
-        side: defaultSide,
-        distance: LABEL_OFFSET,
-        maxWidth: 200,
-        shiftX: 0,
-        shiftY: 0,
+        side: marker.desktopLabel?.side ?? defaultSide,
+        distance: marker.desktopLabel?.distance ?? LABEL_OFFSET,
+        maxWidth: marker.desktopLabel?.maxWidth ?? 200,
+        shiftX: marker.desktopLabel?.shiftX ?? 0,
+        shiftY: marker.desktopLabel?.shiftY ?? 0,
       };
     }
 
-    const config = MOBILE_FUTURE_LABEL_CONFIGS[index];
+    const config = marker.mobileLabel;
     return {
-      side: config?.side ?? getResponsiveSide(defaultSide, index),
+      side: config?.side ?? marker.mobileSide ?? getResponsiveSide(defaultSide, index),
       distance: config?.distance ?? labelOffset,
       maxWidth: config?.maxWidth ?? Math.min(260, containerWidth * 0.56),
       shiftX: config?.shiftX ?? 0,
@@ -210,8 +214,14 @@ export function JourneyMap() {
   const getCurrentMarkerPct = (marker: CurrentStateMarker) =>
     isMobileLayout ? marker.mobilePct : marker.desktopPct;
 
-  const getCurrentMobileSide = (index: number, defaultSide: LabelSide) =>
-    isMobileLayout ? (MOBILE_CURRENT_LABEL_CONFIGS[index]?.side ?? getResponsiveSide(defaultSide, index)) : defaultSide;
+  const getCurrentMobileSide = (marker: CurrentStateMarker, index: number, defaultSide: LabelSide) =>
+    isMobileLayout ? (marker.mobileSide ?? getResponsiveSide(defaultSide, index)) : defaultSide;
+
+  const resolveConfigImage = (image?: string) => {
+    if (!image) return undefined;
+    if (image.startsWith('http://') || image.startsWith('https://') || image.startsWith('/')) return image;
+    return comparisonImageAssetsByFilename[image] ?? image;
+  };
 
   const getMarkerPosition = (pos: ComputedPoint, index = -1, markerType: 'current' | 'future' = 'future') => {
     if (!isMobileLayout) {
@@ -272,6 +282,13 @@ export function JourneyMap() {
     window.addEventListener('resize', updateViewportWidth);
     return () => window.removeEventListener('resize', updateViewportWidth);
   }, []);
+
+  useEffect(() => {
+    if (availableStates.length === 0) return;
+    if (!availableStates.includes(journeyState)) {
+      setJourneyState(availableStates[0]);
+    }
+  }, [availableStates, journeyState]);
 
   // Compute all positions from the path using getPointAtLength
   const computePositions = useCallback(() => {
@@ -343,12 +360,14 @@ export function JourneyMap() {
 
   const markersVisible = showElements && !markersTransitioning;
   const summaryData = journeyState === 'current' ? currentSummaryData : futureSummaryData;
+  const desktopGuidedTourIndex = Math.max(0, activeMap.futureStateMarkers.findIndex(marker => marker.id === activeMap.guidedTour.desktopAnchorMarkerId));
+  const mobileGuidedTourIndex = Math.max(0, activeMap.futureStateMarkers.findIndex(marker => marker.id === activeMap.guidedTour.mobileAnchorMarkerId));
 
   const selectedStage = selectedStep ? journeyStages[selectedStep.stageIdx] : null;
   const selectedPlatform = selectedStage?.platforms[0] || null;
 
   return (
-    <div className="bg-[#FAFAFA] min-h-screen flex flex-col overflow-x-hidden" style={{ fontFamily: 'Arial, sans-serif' }}>
+    <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ fontFamily: 'Arial, sans-serif', background: activeMap.theme.pageBackground }}>
       {/* Header */}
       <div className="bg-white border-b border-[#e8e8e8] shrink-0 relative z-30">
         <div className="flex items-center justify-between gap-[16px] px-[12px] py-[12px] md:px-[40px] md:py-[24px] lg:px-[85px]">
@@ -358,11 +377,12 @@ export function JourneyMap() {
             </div>
             {!isMobileLayout && (
               <p className="leading-none text-[#191919] text-[24px] tracking-[-0.84px] whitespace-nowrap" style={{ fontWeight: 'bold' }}>
-                Nondegree Journey Map
+                {activeMap.brand.title}
               </p>
             )}
           </div>
           {/* State Toggle */}
+          {availableStates.length > 1 ? (
           <div
             style={{
               background: '#FAFAFA',
@@ -391,7 +411,7 @@ export function JourneyMap() {
                 pointerEvents: 'none',
               }}
             />
-            {(['current', 'future'] as const).map((state) => {
+            {availableStates.map((state) => {
               const isActive = journeyState === state;
               const isHovered = hoveredToggle === state;
               const isPressed = pressedToggle === state;
@@ -421,11 +441,16 @@ export function JourneyMap() {
                     transition: 'background 150ms ease, color 200ms ease',
                   }}
                 >
-                  {state === 'current' ? 'Current state' : 'Future state'}
+                  {state === 'current' ? stateLabels.current : stateLabels.future}
                 </button>
               );
             })}
           </div>
+          ) : (
+            <div className="rounded-full border border-[#D0D0D0] bg-[#FAFAFA] px-[18px] py-[12px] text-[16px] text-[#191919]" style={{ fontWeight: 'bold' }}>
+              {availableStates[0] === 'current' ? stateLabels.current : stateLabels.future}
+            </div>
+          )}
         </div>
       </div>
 
@@ -470,7 +495,7 @@ export function JourneyMap() {
                       ref={roadRef}
                       d={ROAD_PATH}
                       stroke="url(#pathGradient)"
-                      strokeWidth="42"
+                      strokeWidth={activeMap.theme.pathStrokeWidth}
                       strokeLinecap="butt"
                       strokeLinejoin="round"
                       fill="none"
@@ -483,7 +508,7 @@ export function JourneyMap() {
                       strokeDasharray="12 12"
                       strokeLinecap="butt"
                       strokeOpacity="0.25"
-                      strokeWidth="3"
+                      strokeWidth={activeMap.theme.centerlineStrokeWidth}
                       fill="none"
                       vectorEffect="non-scaling-stroke"
                     />
@@ -496,7 +521,7 @@ export function JourneyMap() {
                   ref={roadRef}
                   d={ROAD_PATH}
                   stroke="url(#pathGradient)"
-                  strokeWidth="42"
+                  strokeWidth={activeMap.theme.pathStrokeWidth}
                   strokeLinecap="butt"
                   strokeLinejoin="round"
                   fill="none"
@@ -509,7 +534,7 @@ export function JourneyMap() {
                   strokeDasharray="12 12"
                   strokeLinecap="butt"
                   strokeOpacity="0.25"
-                  strokeWidth="3"
+                  strokeWidth={activeMap.theme.centerlineStrokeWidth}
                   fill="none"
                   vectorEffect="non-scaling-stroke"
                 />
@@ -523,30 +548,59 @@ export function JourneyMap() {
           {currentPositions.map((pos, i) => {
             const marker = currentStateMarkers[i];
             const { x: pixelX, y: pixelY } = getMarkerPosition(pos, i, 'current');
-            const side = getCurrentMobileSide(i, marker.side);
+            const side = getCurrentMobileSide(marker, i, marker.side);
             const labelStyle = getLabelStyle(pixelX, pixelY, side);
+            const showCardLabel = marker.labelVariant !== 'plain';
             return (
               <div
                 key={`pp-${i}`}
                 style={{
-                  opacity: journeyState === 'current' ? (markersVisible ? 1 : 0) : 0,
+                  opacity: journeyState === 'current' && features.currentStateEnabled ? (markersVisible ? 1 : 0) : 0,
                   transition: 'opacity 0.25s ease',
                   pointerEvents: 'none',
                 }}
               >
-                {/* Rounded-square marker with warning icon */}
-                <img
-                  src={warningIcon}
-                  alt=""
-                  className="absolute"
-                  style={{
-                    left: pixelX - (isMobileLayout ? 22 : 25),
-                    top: pixelY - (isMobileLayout ? 20 : 22),
-                    width: isMobileLayout ? 44 : 50,
-                    height: isMobileLayout ? 40 : 45,
-                    pointerEvents: 'none',
-                  }}
-                />
+                {/* Marker icon / dot */}
+                {marker.icon === 'email' ? (
+                  <img
+                    src={emailIcon}
+                    alt=""
+                    className="absolute"
+                    style={{
+                      left: pixelX - (isMobileLayout ? 20 : 23),
+                      top: pixelY - (isMobileLayout ? 20 : 23),
+                      width: isMobileLayout ? 40 : 46,
+                      height: isMobileLayout ? 40 : 46,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                ) : marker.icon === 'warning' ? (
+                  <img
+                    src={warningIcon}
+                    alt=""
+                    className="absolute"
+                    style={{
+                      left: pixelX - (isMobileLayout ? 22 : 25),
+                      top: pixelY - (isMobileLayout ? 20 : 22),
+                      width: isMobileLayout ? 44 : 50,
+                      height: isMobileLayout ? 40 : 45,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                ) : (
+                  <div
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: pixelX - (isMobileLayout ? 8 : 9),
+                      top: pixelY - (isMobileLayout ? 8 : 9),
+                      width: isMobileLayout ? 16 : 18,
+                      height: isMobileLayout ? 16 : 18,
+                      borderRadius: '50%',
+                      background: '#191919',
+                      border: '3px solid white',
+                    }}
+                  />
+                )}
                 {/* Label */}
                 <div
                   className="absolute"
@@ -563,6 +617,12 @@ export function JourneyMap() {
                       textAlign: 'center',
                       lineHeight: 1.35,
                       padding: isMobileLayout ? '12px' : '12px 10px',
+                      borderRadius: showCardLabel ? 6 : 0,
+                      background: showCardLabel ? 'rgba(255,255,255,0.8)' : 'transparent',
+                      border: showCardLabel ? '1px solid rgba(0,0,0,0.1)' : '1px solid transparent',
+                      backdropFilter: showCardLabel ? 'blur(16px)' : undefined,
+                      WebkitBackdropFilter: showCardLabel ? 'blur(16px)' : undefined,
+                      boxShadow: showCardLabel ? '0px 2px 8px rgba(0,0,0,0.1)' : 'none',
                       whiteSpace: 'pre-line',
                     }}
                   >
@@ -581,11 +641,11 @@ export function JourneyMap() {
             const isCirclePressed = pressedDotCircle === i;
             const isLabelPressed = pressedDotLabel === i;
             const { x: pixelX, y: pixelY } = getMarkerPosition(pos, i, 'future');
-            const guidedTourDotIndex = isMobileLayout ? 0 : 1;
+            const guidedTourDotIndex = isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex;
             const isGuidedTourDot = i === guidedTourDotIndex;
             const showActiveFutureStyle = isMobileLayout || isHovered;
 
-            const mobileLabelConfig = getFutureMobileLabelConfig(i, marker.side);
+            const mobileLabelConfig = getFutureMobileLabelConfig(marker, i, marker.side);
             const side = mobileLabelConfig.side;
             const labelStyle = getLabelStyle(
               pixelX,
@@ -600,13 +660,13 @@ export function JourneyMap() {
               <div
                 key={`future-${i}`}
                 style={{
-                  opacity: journeyState === 'future' ? (markersVisible ? 1 : 0) : 0,
+                  opacity: journeyState === 'future' && features.futureStateEnabled ? (markersVisible ? 1 : 0) : 0,
                   transition: 'opacity 0.25s ease',
-                  pointerEvents: journeyState === 'future' ? 'auto' : 'none',
+                  pointerEvents: journeyState === 'future' && features.futureStateEnabled ? 'auto' : 'none',
                 }}
               >
                 {/* Pulse ring on first dot while popover is visible */}
-                {isGuidedTourDot && showPopover && journeyState === 'future' && (
+                {features.guidedTourEnabled && activeMap.guidedTour.enabled && isGuidedTourDot && showPopover && journeyState === 'future' && (
                   <div
                     className="absolute pointer-events-none"
                     style={{
@@ -631,19 +691,24 @@ export function JourneyMap() {
                     background: isHovered ? 'rgba(0,0,0,0.05)' : 'transparent',
                     transition: 'background 0.2s ease',
                   }}
-                  onClick={() => setSelectedStep({
-                    stageIdx: marker.stageIdx,
-                    stepIdx: marker.stepIdx,
-                    label: marker.label.split('\n').join(' '),
-                    markerIndex: i,
-                  })}
+                  onClick={() => {
+                    if (!features.comparisonModalEnabled) return;
+                    setSelectedStep({
+                      stageIdx: marker.stageIdx,
+                      stepIdx: marker.stepIdx,
+                      label: marker.label.split('\n').join(' '),
+                      markerIndex: i,
+                      beforeImg: resolveConfigImage(marker.beforeImage),
+                      afterImg: resolveConfigImage(marker.afterImage),
+                    });
+                  }}
                   onMouseEnter={() => setHoveredDot(i)}
                   onMouseLeave={() => { setHoveredDot(null); setPressedDotCircle(null); }}
                   onMouseDown={() => setPressedDotCircle(i)}
                   onMouseUp={() => setPressedDotCircle(null)}
                 />
                 {/* Dot / Icon */}
-                {[4, 7, 9, 11].includes(i) ? (
+                {marker.icon === 'email' ? (
                   <img
                     src={emailIcon}
                     alt="Email"
@@ -655,6 +720,21 @@ export function JourneyMap() {
                       height: isMobileLayout ? 40 : 46,
                       transform: isCirclePressed ? 'scale(0.9)' : isHovered ? 'scale(1.4)' : 'scale(1)',
                       filter: showActiveFutureStyle && !isCirclePressed ? 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))' : 'none',
+                      transition: 'transform 0.2s ease, filter 0.2s ease',
+                    }}
+                  />
+                ) : marker.icon === 'warning' ? (
+                  <img
+                    src={warningIcon}
+                    alt="Warning"
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: pixelX - (isMobileLayout ? 22 : 25),
+                      top: pixelY - (isMobileLayout ? 20 : 22),
+                      width: isMobileLayout ? 44 : 50,
+                      height: isMobileLayout ? 40 : 45,
+                      transform: isCirclePressed ? 'scale(0.9)' : isHovered ? 'scale(1.08)' : 'scale(1)',
+                      filter: showActiveFutureStyle && !isCirclePressed ? 'drop-shadow(0 3px 8px rgba(0,0,0,0.35))' : 'none',
                       transition: 'transform 0.2s ease, filter 0.2s ease',
                     }}
                   />
@@ -690,11 +770,25 @@ export function JourneyMap() {
                       lineHeight: 1.35,
                       padding: isMobileLayout ? '12px' : '12px 10px',
                       borderRadius: 6,
-                      background: showActiveFutureStyle ? 'rgba(255,255,255,0.8)' : 'transparent',
-                      border: showActiveFutureStyle ? '1px solid rgba(0,0,0,0.1)' : '1px solid transparent',
-                      backdropFilter: showActiveFutureStyle ? 'blur(16px)' : undefined,
-                      WebkitBackdropFilter: showActiveFutureStyle ? 'blur(16px)' : undefined,
-                      boxShadow: showActiveFutureStyle ? '0px 2px 8px rgba(0,0,0,0.1)' : 'none',
+                      background: marker.labelVariant === 'card'
+                        ? 'rgba(255,255,255,0.8)'
+                        : marker.labelVariant === 'interactive-card'
+                          ? showActiveFutureStyle ? 'rgba(255,255,255,0.8)' : 'transparent'
+                          : 'transparent',
+                      border: marker.labelVariant === 'plain'
+                        ? '1px solid transparent'
+                        : marker.labelVariant === 'card'
+                          ? '1px solid rgba(0,0,0,0.1)'
+                          : showActiveFutureStyle ? '1px solid rgba(0,0,0,0.1)' : '1px solid transparent',
+                      backdropFilter: marker.labelVariant === 'plain'
+                        ? undefined
+                        : marker.labelVariant === 'card' || showActiveFutureStyle ? 'blur(16px)' : undefined,
+                      WebkitBackdropFilter: marker.labelVariant === 'plain'
+                        ? undefined
+                        : marker.labelVariant === 'card' || showActiveFutureStyle ? 'blur(16px)' : undefined,
+                      boxShadow: marker.labelVariant === 'plain'
+                        ? 'none'
+                        : marker.labelVariant === 'card' || showActiveFutureStyle ? '0px 2px 8px rgba(0,0,0,0.1)' : 'none',
                       transform: isLabelPressed ? 'scale(0.95)' : 'scale(1)',
                       transition: 'background 0.2s ease, border 0.2s ease, box-shadow 0.2s ease',
                       whiteSpace: 'pre-line',
@@ -702,12 +796,17 @@ export function JourneyMap() {
                       pointerEvents: journeyState === 'future' ? 'auto' : 'none',
                       cursor: journeyState === 'future' ? 'pointer' : 'default',
                     }}
-                    onClick={() => setSelectedStep({
-                      stageIdx: marker.stageIdx,
-                      stepIdx: marker.stepIdx,
-                      label: marker.label.split('\n').join(' '),
-                      markerIndex: i,
-                    })}
+                    onClick={() => {
+                      if (!features.comparisonModalEnabled) return;
+                      setSelectedStep({
+                        stageIdx: marker.stageIdx,
+                        stepIdx: marker.stepIdx,
+                        label: marker.label.split('\n').join(' '),
+                        markerIndex: i,
+                        beforeImg: resolveConfigImage(marker.beforeImage),
+                        afterImg: resolveConfigImage(marker.afterImage),
+                      });
+                    }}
                     onMouseEnter={() => setHoveredDot(i)}
                     onMouseLeave={() => { setHoveredDot(null); setPressedDotLabel(null); }}
                     onMouseDown={() => setPressedDotLabel(i)}
@@ -721,14 +820,16 @@ export function JourneyMap() {
           })}
 
           {/* Guided Tour Popover — only in Future state, anchored to the guided-tour dot */}
-          {futurePositions.length > 0 && journeyState === 'future' && (
+          {features.guidedTourEnabled && activeMap.guidedTour.enabled && futurePositions.length > 0 && journeyState === 'future' && (
             <GuidedTourPopover
               visible={showPopover}
               onDismiss={() => setShowPopover(false)}
-              anchorX={getMarkerPosition(futurePositions[isMobileLayout ? 0 : 1], isMobileLayout ? 0 : 1, 'future').x}
-              anchorY={getMarkerPosition(futurePositions[isMobileLayout ? 0 : 1], isMobileLayout ? 0 : 1, 'future').y}
+              anchorX={getMarkerPosition(futurePositions[isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex], isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex, 'future').x}
+              anchorY={getMarkerPosition(futurePositions[isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex], isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex, 'future').y}
               placement={isMobileLayout ? 'below' : 'above'}
               compact={isMobileLayout}
+              title={activeMap.guidedTour.title}
+              body={activeMap.guidedTour.body}
             />
           )}
         </div>
@@ -766,15 +867,17 @@ export function JourneyMap() {
 
       {/* Platform Modal */}
       <AnimatePresence>
-        {selectedStep && selectedPlatform && selectedStage && (
+        {features.comparisonModalEnabled && selectedStep && selectedPlatform && selectedStage && (
           <PlatformModal
             platform={selectedPlatform}
             stageColor={stageColors[selectedStep.stageIdx]}
             stepLabel={selectedStep.label}
             stageName={selectedStage.title}
+            beforeLabel={stateLabels.current}
+            afterLabel={stateLabels.future}
             onClose={() => setSelectedStep(null)}
-            beforeImg={comparisonImages[selectedStep.markerIndex]?.before}
-            afterImg={comparisonImages[selectedStep.markerIndex]?.after}
+            beforeImg={selectedStep.beforeImg}
+            afterImg={selectedStep.afterImg}
           />
         )}
       </AnimatePresence>

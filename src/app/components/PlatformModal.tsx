@@ -11,12 +11,24 @@ interface PlatformModalProps {
   stageColor: string;
   stepLabel: string;
   stageName: string;
+  beforeLabel?: string;
+  afterLabel?: string;
   onClose: () => void;
   beforeImg?: string;
   afterImg?: string;
 }
 
-export function PlatformModal({ platform, stageColor, stepLabel, stageName, onClose, beforeImg: beforeImgProp, afterImg: afterImgProp }: PlatformModalProps) {
+export function PlatformModal({
+  platform,
+  stageColor,
+  stepLabel,
+  stageName,
+  beforeLabel = 'Current state',
+  afterLabel = 'Future state',
+  onClose,
+  beforeImg: beforeImgProp,
+  afterImg: afterImgProp,
+}: PlatformModalProps) {
   const IMAGE_ASPECT_RATIO = 1280 / 832;
   const beforeSrc = beforeImgProp ?? imgBefore;
   const afterSrc = afterImgProp ?? imgAfter;
@@ -139,12 +151,12 @@ export function PlatformModal({ platform, stageColor, stepLabel, stageName, onCl
 
             {/* After / Proposed (full, underneath) */}
             <div className="absolute inset-0">
-              <img src={afterSrc} alt="Future state" className="w-full h-full object-contain pointer-events-none select-none" draggable={false} />
+              <img src={afterSrc} alt={afterLabel} className="w-full h-full object-contain pointer-events-none select-none" draggable={false} />
             </div>
 
             {/* Before / Current (clipped from left) */}
             <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}>
-              <img src={beforeSrc} alt="Current state" className="w-full h-full object-contain pointer-events-none select-none" draggable={false} />
+              <img src={beforeSrc} alt={beforeLabel} className="w-full h-full object-contain pointer-events-none select-none" draggable={false} />
             </div>
 
             {/* Divider */}
@@ -169,12 +181,12 @@ export function PlatformModal({ platform, stageColor, stepLabel, stageName, onCl
           </div>
 
           <div className="flex justify-between items-center mt-[16px]">
-            <p className="text-[14px] text-[#191919]" style={{ fontWeight: 'bold' }}>Current state</p>
+            <p className="text-[14px] text-[#191919]" style={{ fontWeight: 'bold' }}>{beforeLabel}</p>
             <div className="flex items-center gap-[10px]">
               <svg className="size-[16px]" fill="none" viewBox="0 0 17 17">
                 <path d={svgPaths.pd955300} fill="#4A8400" />
               </svg>
-              <p className="text-[14px] text-[#4a8500]" style={{ fontWeight: 'bold' }}>Future state</p>
+              <p className="text-[14px] text-[#4a8500]" style={{ fontWeight: 'bold' }}>{afterLabel}</p>
             </div>
           </div>
         </div>

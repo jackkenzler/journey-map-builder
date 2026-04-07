@@ -9,6 +9,8 @@ interface GuidedTourPopoverProps {
   anchorY: number;
   placement?: 'above' | 'below';
   compact?: boolean;
+  title?: string;
+  body?: string;
 }
 
 /* Illustration: colored path + dot + hand + stars (from Figma Frame6) */
@@ -142,6 +144,8 @@ export function GuidedTourPopover({
   anchorY,
   placement = 'above',
   compact = false,
+  title = 'This map is interactive',
+  body = 'Each dot marks a moment in the student experience. Click to see current friction and the proposed improvement side by side.',
 }: GuidedTourPopoverProps) {
   const popoverWidth = compact ? undefined : 340;
   const tailSize = 10;
@@ -184,14 +188,14 @@ export function GuidedTourPopover({
                 className={`flex-1 text-white leading-[1.2] ${compact ? 'text-[26px] tracking-[-0.72px]' : 'text-[28px] tracking-[-0.98px]'}`}
                 style={{ fontWeight: 'bold' }}
               >
-                This map is interactive
+                {title}
               </p>
               <Illustration />
             </div>
 
             {/* Body */}
             <p className={`text-[#f1f1f1] ${compact ? 'text-[16px] leading-[24px]' : 'text-[16px] leading-[24px]'}`}>
-              Each dot marks a moment in the student&apos;s experience. Click to see current friction and the proposed improvement side by side.
+              {body}
             </p>
 
             {/* Button */}
