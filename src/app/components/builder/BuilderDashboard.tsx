@@ -1,7 +1,7 @@
 import { useOrganization, useOrganizationList, useUser } from '@clerk/clerk-react';
 import { Plus, Rocket } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { asuNondegreeProject } from '../../../builder';
 import { getBuilderRole } from '../../../builder/access';
 import { listPublishedJourneyMaps, saveDraftProject } from '../../../builder/draftStorage';
@@ -22,6 +22,7 @@ export function BuilderDashboard() {
   const { user } = useUser();
   const { organization } = useOrganization();
   const { userMemberships } = useOrganizationList({ userMemberships: true });
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<JourneyMapProject[]>([]);
   const [newMapTitle, setNewMapTitle] = useState('');
   const [creating, setCreating] = useState(false);
@@ -38,7 +39,10 @@ export function BuilderDashboard() {
   const currentOrg = useMemo(
     () => ({
       id: organization?.id ?? asuNondegreeProject.organization.id,
-      slug: organization?.slug ?? asuNondegreeProject.organization.slug,
+      slug:
+        organization?.slug ??
+        (organization?.name ? slugify(organization.name) : undefined) ??
+        asuNondegreeProject.organization.slug,
       name: organization?.name ?? asuNondegreeProject.organization.name,
     }),
     [organization],
@@ -120,6 +124,7 @@ export function BuilderDashboard() {
     setNewMapTitle('');
     setCreating(false);
     refreshProjects();
+    navigate(`/app/orgs/${newProject.organization.slug}/maps/${newProject.map.slug}`);
   };
 
   return (
