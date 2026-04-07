@@ -1,14 +1,17 @@
-import { createBrowserRouter } from "react-router";
-import { JourneyMap } from "./components/JourneyMap";
+import { createBrowserRouter, Navigate } from "react-router";
 import { BuilderDashboard } from "./components/builder/BuilderDashboard";
 import { BuilderMapView } from "./components/builder/BuilderMapView";
 import { BuilderLayout } from "./components/builder/BuilderLayout";
 import { JourneyMapPreviewPage, PublishedJourneyMapPage } from "./components/builder/PublicJourneyMapPages";
 
+function HomeRedirect() {
+  return <Navigate to="/app" replace />;
+}
+
 export const router = createBrowserRouter([
   {
     path: "/",
-    Component: JourneyMap,
+    Component: HomeRedirect,
   },
   {
     path: "/preview/:orgSlug/:mapSlug",
@@ -34,6 +37,6 @@ export const router = createBrowserRouter([
   },
   {
     path: "*",
-    Component: JourneyMap,
+    Component: HomeRedirect,
   },
 ]);
