@@ -2,8 +2,6 @@ import { motion } from 'motion/react';
 import { X } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { Platform } from '../data/journeyData';
-import imgBefore from 'figma:asset/e140f9072ed72d5ecae5f47012660a5c7f8b586a.png';
-import imgAfter from 'figma:asset/8b510fad6f19629ead6cb8cddfcde457bbbbf8fb.png';
 import svgPaths from '../../imports/svg-gjcu1703xj';
 
 interface PlatformModalProps {
@@ -18,6 +16,25 @@ interface PlatformModalProps {
   afterImg?: string;
 }
 
+function createPlaceholderImage(label: string, accentColor: string) {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="832" viewBox="0 0 1280 832">
+      <rect width="1280" height="832" fill="#F7F7F5"/>
+      <rect x="48" y="48" width="1184" height="736" rx="28" fill="white" stroke="#E5E7EB" stroke-width="4"/>
+      <rect x="96" y="96" width="1088" height="14" rx="7" fill="#ECECEC"/>
+      <rect x="96" y="136" width="540" height="14" rx="7" fill="#ECECEC"/>
+      <rect x="96" y="238" width="180" height="180" rx="24" fill="${accentColor}" opacity="0.12"/>
+      <rect x="312" y="250" width="340" height="18" rx="9" fill="#D9D9D9"/>
+      <rect x="312" y="292" width="480" height="18" rx="9" fill="#E7E7E7"/>
+      <rect x="312" y="334" width="420" height="18" rx="9" fill="#E7E7E7"/>
+      <rect x="96" y="502" width="240" height="48" rx="24" fill="${accentColor}" opacity="0.16"/>
+      <text x="640" y="660" text-anchor="middle" fill="#191919" font-family="Arial, sans-serif" font-size="42" font-weight="700">${label}</text>
+      <text x="640" y="710" text-anchor="middle" fill="#6B7280" font-family="Arial, sans-serif" font-size="26">Upload an image in the builder to replace this placeholder</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 export function PlatformModal({
   platform,
   stageColor,
@@ -30,8 +47,8 @@ export function PlatformModal({
   afterImg: afterImgProp,
 }: PlatformModalProps) {
   const IMAGE_ASPECT_RATIO = 1280 / 832;
-  const beforeSrc = beforeImgProp ?? imgBefore;
-  const afterSrc = afterImgProp ?? imgAfter;
+  const beforeSrc = beforeImgProp || createPlaceholderImage(beforeLabel, '#5C6670');
+  const afterSrc = afterImgProp || createPlaceholderImage(afterLabel, stageColor);
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);

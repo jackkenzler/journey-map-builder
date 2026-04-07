@@ -85,6 +85,7 @@ interface SelectedStep {
 
 interface JourneyMapProps {
   projectOverride?: JourneyMapProject;
+  exportMode?: boolean;
 }
 
 function getGradientTransitionOffsets(colorCount: number) {
@@ -131,7 +132,7 @@ function getGradientColorStops(colors: string[]) {
   return stops;
 }
 
-export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
+export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapProps = {}) {
   const [activeProject] = useState(
     () =>
       projectOverride ??
@@ -142,7 +143,7 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
   const [journeyState, setJourneyState] = useState<JourneyState>('future');
   const [markersTransitioning, setMarkersTransitioning] = useState(false);
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
-  const [showElements, setShowElements] = useState(false);
+  const [showElements, setShowElements] = useState(exportMode);
   const [showPopover, setShowPopover] = useState(false);
   const [currentPositions, setCurrentPositions] = useState<ComputedPoint[]>([]);
   const [futurePositions, setFuturePositions] = useState<ComputedPoint[]>([]);
@@ -154,7 +155,7 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
   const [pressedToggle, setPressedToggle] = useState<'current' | 'future' | null>(null);
   const [containerWidth, setContainerWidth] = useState(BASE_WIDTH);
   const [viewportWidth, setViewportWidth] = useState(
-    typeof window !== 'undefined' ? window.innerWidth : BASE_WIDTH
+    exportMode ? BASE_WIDTH : (typeof window !== 'undefined' ? window.innerWidth : BASE_WIDTH)
   );
   const roadRef = useRef<SVGPathElement>(null);
   const dashRef = useRef<SVGPathElement>(null);
@@ -268,7 +269,15 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
 
   const resolveConfigImage = (image?: string) => {
     if (!image) return undefined;
-    if (image.startsWith('http://') || image.startsWith('https://') || image.startsWith('/')) return image;
+    if (
+      image.startsWith('http://') ||
+      image.startsWith('https://') ||
+      image.startsWith('/') ||
+      image.startsWith('data:') ||
+      image.startsWith('blob:')
+    ) {
+      return image;
+    }
     return comparisonImageAssetsByFilename[image] ?? image;
   };
 
@@ -326,11 +335,16 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
   }, []);
 
   useEffect(() => {
+    if (exportMode) {
+      setViewportWidth(BASE_WIDTH);
+      return;
+    }
+
     const updateViewportWidth = () => setViewportWidth(window.innerWidth);
     updateViewportWidth();
     window.addEventListener('resize', updateViewportWidth);
     return () => window.removeEventListener('resize', updateViewportWidth);
-  }, []);
+  }, [exportMode]);
 
   useEffect(() => {
     if (availableStates.length === 0) return;
@@ -368,6 +382,13 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
 
   // Path draw-in animation
   useEffect(() => {
+    if (exportMode) {
+      computePositions();
+      setShowElements(true);
+      setShowPopover(false);
+      return;
+    }
+
     const road = roadRef.current;
     if (!road) return;
 
@@ -405,7 +426,7 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
 
     const timer = setTimeout(() => requestAnimationFrame(animate), 300);
     return () => clearTimeout(timer);
-  }, [computePositions]);
+  }, [computePositions, exportMode]);
 
   const markersVisible = showElements && !markersTransitioning;
   const summaryData = journeyState === 'current' ? currentSummaryData : futureSummaryData;

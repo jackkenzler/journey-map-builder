@@ -23,8 +23,9 @@ function normalizeProject(row: JourneyMapWithRelations): JourneyMapProject | nul
 }
 
 export async function listJourneyMapProjects(): Promise<JourneyMapProject[]> {
+  const localDrafts = listDraftProjects();
+
   if (!supabase) {
-    const localDrafts = listDraftProjects();
     const merged = new Map<string, JourneyMapProject>();
 
     [...journeyMapProjects, ...localDrafts].forEach((project) => {
@@ -64,14 +65,19 @@ export async function listJourneyMapProjects(): Promise<JourneyMapProject[]> {
     .order('updated_at', { ascending: false });
 
   if (error || !data) {
-    return journeyMapProjects;
+    const merged = new Map<string, JourneyMapProject>();
+
+    [...journeyMapProjects, ...localDrafts].forEach((project) => {
+      merged.set(`${project.organization.slug}:${project.map.slug}`, project);
+    });
+
+    return Array.from(merged.values());
   }
 
   const normalized = (data as unknown as JourneyMapWithRelations[])
     .map(normalizeProject)
     .filter((project): project is JourneyMapProject => Boolean(project));
 
-  const localDrafts = listDraftProjects();
   const merged = new Map<string, JourneyMapProject>();
 
   [...(normalized.length > 0 ? normalized : journeyMapProjects), ...localDrafts].forEach((project) => {

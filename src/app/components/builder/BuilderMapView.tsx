@@ -1,6 +1,6 @@
 import { useOrganization } from '@clerk/clerk-react';
 import { toPng } from 'html-to-image';
-import { Download, House } from 'lucide-react';
+import { Download, House, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { asuNondegreeProject } from '../../../builder';
@@ -164,6 +164,56 @@ function buildLabelConfigWithOptionalSide(
 
 function nextPct(lastPct: number | undefined, fallback: number) {
   return Number(Math.min(0.95, (lastPct ?? fallback) + 0.04).toFixed(4));
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error ?? new Error('Unable to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function UploadField({
+  label,
+  onChange,
+  disabled,
+  hasValue,
+}: {
+  label: string;
+  onChange: (file: File | null) => void | Promise<void>;
+  disabled?: boolean;
+  hasValue: boolean;
+}) {
+  return (
+    <label className="grid gap-[8px]">
+      <FieldLabel>{label}</FieldLabel>
+      <div className="flex items-center gap-[12px] rounded-[12px] border border-black/10 bg-white px-[12px] py-[10px]">
+        <span
+          className={`inline-flex items-center gap-[8px] rounded-full px-[14px] py-[9px] text-[14px] text-white ${interactiveButtonClassName} ${disabled ? 'cursor-not-allowed bg-[#B7B7B7]' : 'bg-[#8C1D40] hover:bg-[#7a1938]'}`}
+          style={{ fontWeight: 'bold' }}
+        >
+          <Upload className="size-[16px]" />
+          Upload photo
+        </span>
+        <span className="text-[14px] text-[#5f5f5f]">
+          {hasValue ? 'Image uploaded' : 'PNG, JPG, or WebP'}
+        </span>
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/jpg,image/webp"
+          onChange={async (event) => {
+            const file = event.target.files?.[0] ?? null;
+            await onChange(file);
+            event.target.value = '';
+          }}
+          className="hidden"
+          disabled={disabled}
+        />
+      </div>
+    </label>
+  );
 }
 
 function distributeMarkerPlacements<T extends JourneyMarkerConfig>(
@@ -633,6 +683,19 @@ export function BuilderMapView() {
     }));
   };
 
+  const handleFutureImageUpload = async (
+    index: number,
+    field: 'beforeImage' | 'afterImage',
+    file: File | null,
+  ) => {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    updateFutureMarker(index, (currentMarker) => ({
+      ...currentMarker,
+      [field]: dataUrl,
+    }));
+  };
+
   if (project === undefined) {
     return (
       <div className="min-h-screen bg-[#FAFAFA] px-[24px] py-[48px]" style={{ fontFamily: 'Arial, sans-serif' }}>
@@ -785,9 +848,15 @@ export function BuilderMapView() {
           </div>
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
             <p className="mb-[8px] text-[14px] text-[#767676]">Published URL</p>
-            <p className="text-[16px] break-all text-[#191919]" style={{ fontWeight: 'bold' }}>
+            <Link
+              to={publishedHref}
+              target="_blank"
+              rel="noreferrer"
+              className={`text-[16px] break-all text-[#8C1D40] underline underline-offset-4 ${interactiveLinkClassName}`}
+              style={{ fontWeight: 'bold' }}
+            >
               {publishedHref}
-            </p>
+            </Link>
           </div>
         </div>
 
@@ -966,7 +1035,14 @@ export function BuilderMapView() {
 
                     <div className="rounded-[12px] border border-black/10 bg-white p-[14px]">
                       <p className="mb-[4px] text-[14px] text-[#767676]">Published preview URL</p>
-                      <p className="break-all text-[15px] text-[#191919]">{publishedHref}</p>
+                      <Link
+                        to={publishedHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`break-all text-[15px] text-[#8C1D40] underline underline-offset-4 ${interactiveLinkClassName}`}
+                      >
+                        {publishedHref}
+                      </Link>
                     </div>
                   </div>
                 </SectionCard>
@@ -1719,6 +1795,8 @@ export function BuilderMapView() {
                                     }))
                                   }
                                   className={mutedInputClassName}
+                                  disabled={!features.comparisonModalEnabled}
+                                  placeholder={features.comparisonModalEnabled ? 'Filename, URL, or uploaded image data' : 'Enable comparison modal first'}
                                 />
                               </label>
                               <label className="grid gap-[8px]">
@@ -1732,8 +1810,38 @@ export function BuilderMapView() {
                                     }))
                                   }
                                   className={mutedInputClassName}
+                                  disabled={!features.comparisonModalEnabled}
+                                  placeholder={features.comparisonModalEnabled ? 'Filename, URL, or uploaded image data' : 'Enable comparison modal first'}
                                 />
                               </label>
+                            </div>
+
+                            <div className="grid gap-[12px] md:grid-cols-2">
+                              <UploadField
+                                label="Upload before image"
+                                hasValue={Boolean(marker.beforeImage)}
+                                disabled={!features.comparisonModalEnabled}
+                                onChange={(file) => handleFutureImageUpload(index, 'beforeImage', file)}
+                              />
+                              <UploadField
+                                label="Upload after image"
+                                hasValue={Boolean(marker.afterImage)}
+                                disabled={!features.comparisonModalEnabled}
+                                onChange={(file) => handleFutureImageUpload(index, 'afterImage', file)}
+                              />
+                            </div>
+
+                            <div className="grid gap-[12px] md:grid-cols-2">
+                              <div className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[12px] py-[10px] text-[14px] text-[#5f5f5f]">
+                                {marker.beforeImage
+                                  ? 'Before image configured'
+                                  : 'Before image will use a placeholder until one is uploaded'}
+                              </div>
+                              <div className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[12px] py-[10px] text-[14px] text-[#5f5f5f]">
+                                {marker.afterImage
+                                  ? 'After image configured'
+                                  : 'After image will use a placeholder until one is uploaded'}
+                              </div>
                             </div>
 
                             <div className="grid gap-[12px] xl:grid-cols-2">
@@ -1875,7 +1983,7 @@ export function BuilderMapView() {
 
       <div className="pointer-events-none fixed left-[-10000px] top-0 w-[1280px]" aria-hidden="true">
         <div ref={exportRef}>
-          <JourneyMap projectOverride={previewProject} />
+          <JourneyMap projectOverride={previewProject} exportMode />
         </div>
       </div>
     </div>

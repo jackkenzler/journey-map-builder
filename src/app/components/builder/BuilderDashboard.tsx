@@ -1,6 +1,7 @@
 import { useOrganization, useOrganizationList, useUser } from '@clerk/clerk-react';
-import { Plus, Rocket } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { toPng } from 'html-to-image';
+import { ArrowUpRight, Download, PenSquare, Plus, Rocket } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { asuNondegreeProject } from '../../../builder';
 import { getBuilderRole } from '../../../builder/access';
@@ -8,6 +9,7 @@ import { listPublishedJourneyMaps, saveDraftProject } from '../../../builder/dra
 import { listJourneyMapProjects } from '../../../builder/repository';
 import { hasSupabaseConfig } from '../../../builder/supabase';
 import type { JourneyMapProject } from '../../../builder/types';
+import { JourneyMap } from '../JourneyMap';
 
 function slugify(value: string) {
   return value
@@ -46,6 +48,9 @@ export function BuilderDashboard() {
   const [projects, setProjects] = useState<JourneyMapProject[]>([]);
   const [newMapTitle, setNewMapTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const [exportProject, setExportProject] = useState<JourneyMapProject | null>(null);
+  const [exportingProjectKey, setExportingProjectKey] = useState<string | null>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
   const builderRole = getBuilderRole(user);
 
   const refreshProjects = () => {
@@ -104,14 +109,52 @@ export function BuilderDashboard() {
 
   const displayedProjects = useMemo(() => {
     if (orgScopedProjects.length > 0) return orgScopedProjects;
+    if (projectPool.length > 0) return projectPool;
     return [starterProject];
-  }, [orgScopedProjects, starterProject]);
+  }, [orgScopedProjects, projectPool, starterProject]);
 
   useEffect(() => {
-    if (orgScopedProjects.length > 0) return;
+    if (projectPool.length > 0) return;
     saveDraftProject(starterProject);
     refreshProjects();
-  }, [orgScopedProjects.length, starterProject]);
+  }, [projectPool.length, starterProject]);
+
+  useEffect(() => {
+    if (!exportProject || !exportRef.current) return;
+
+    let cancelled = false;
+
+    const runExport = async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+      if (!exportRef.current || cancelled) return;
+
+      try {
+        const dataUrl = await toPng(exportRef.current, {
+          cacheBust: true,
+          pixelRatio: 2,
+          backgroundColor: exportProject.map.theme.pageBackground,
+        });
+
+        if (cancelled) return;
+
+        const link = document.createElement('a');
+        link.download = `${exportProject.map.slug}.png`;
+        link.href = dataUrl;
+        link.click();
+      } finally {
+        if (!cancelled) {
+          setExportProject(null);
+          setExportingProjectKey(null);
+        }
+      }
+    };
+
+    runExport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [exportProject]);
 
   const handleCreateMap = () => {
     const title = newMapTitle.trim();
@@ -162,6 +205,11 @@ export function BuilderDashboard() {
     setCreating(false);
     refreshProjects();
     navigate(`/app/orgs/${newProject.organization.slug}/maps/${newProject.map.slug}`);
+  };
+
+  const handleDownloadPng = (project: JourneyMapProject) => {
+    setExportingProjectKey(`${project.organization.slug}:${project.map.slug}`);
+    setExportProject(project);
   };
 
   return (
@@ -296,7 +344,7 @@ export function BuilderDashboard() {
               const previewPath = `/preview/${project.organization.slug}/${project.map.slug}`;
               const publishedPath = publishedSite ? `/published/${publishedSite.orgSlug}/${publishedSite.siteSlug}` : null;
               const isStarterTemplate =
-                orgScopedProjects.length === 0 && project.map.slug === asuNondegreeProject.map.slug;
+                projectPool.length === 0 && project.map.slug === asuNondegreeProject.map.slug;
 
               return (
                 <div
@@ -305,7 +353,13 @@ export function BuilderDashboard() {
                 >
                   <div className="flex flex-col gap-[14px] md:flex-row md:items-start md:justify-between">
                     <div className="flex flex-col gap-[8px]">
-                      <div className="inline-flex w-fit items-center gap-[8px] rounded-full bg-[#FAFAFA] px-[12px] py-[6px] text-[13px] text-[#5f5f5f]">
+                      <div
+                        className="inline-flex w-fit items-center gap-[8px] rounded-full px-[12px] py-[6px] text-[13px]"
+                        style={{
+                          background: publishedSite ? '#EEF8F0' : '#FAFAFA',
+                          color: publishedSite ? '#2F6B3B' : '#5f5f5f',
+                        }}
+                      >
                         <Rocket className="size-[14px]" />
                         {publishedSite
                           ? `Published as /published/${publishedSite.orgSlug}/${publishedSite.siteSlug}`
@@ -326,31 +380,34 @@ export function BuilderDashboard() {
                       ) : null}
                     </div>
 
-                    <div className="flex flex-wrap gap-[10px]">
+                    <div className="flex flex-wrap items-center gap-[10px]">
                       <Link
-                        to={previewPath}
+                        to={publishedPath ?? previewPath}
                         target="_blank"
                         rel="noreferrer"
-                        className="rounded-full border border-black/10 bg-[#FAFAFA] px-[16px] py-[10px] text-[14px] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
-                        style={{ fontWeight: 'bold' }}
+                        aria-label="Open public link"
+                        title={publishedPath ? 'Open public link' : 'Open preview map'}
+                        className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-full border border-black/10 bg-[#FAFAFA] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
                       >
-                        Open preview map
+                        <ArrowUpRight className="size-[18px]" />
                       </Link>
-                      {publishedPath && (
-                        <Link
-                          to={publishedPath}
-                          className="rounded-full border border-black/10 bg-[#FAFAFA] px-[16px] py-[10px] text-[14px] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
-                          style={{ fontWeight: 'bold' }}
-                        >
-                          Open published map
-                        </Link>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadPng(project)}
+                        aria-label="Download PNG"
+                        title="Download PNG"
+                        className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-full border border-black/10 bg-[#FAFAFA] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer disabled:cursor-wait disabled:opacity-70"
+                        disabled={exportingProjectKey === `${project.organization.slug}:${project.map.slug}`}
+                      >
+                        <Download className="size-[18px]" />
+                      </button>
                       <Link
                         to={`/app/orgs/${project.organization.slug}/maps/${project.map.slug}`}
-                        className="rounded-full bg-[#8C1D40] px-[18px] py-[10px] text-[14px] text-white transition-all duration-150 hover:bg-[#7a1938] active:scale-[0.98] cursor-pointer"
+                        className="inline-flex items-center gap-[8px] rounded-full bg-[#8C1D40] px-[18px] py-[10px] text-[14px] text-white transition-all duration-150 hover:bg-[#7a1938] active:scale-[0.98] cursor-pointer"
                         style={{ fontWeight: 'bold' }}
                       >
-                        {isStarterTemplate ? 'Open builder editor' : 'Open builder editor'}
+                        <PenSquare className="size-[16px]" />
+                        Open editor
                       </Link>
                     </div>
                   </div>
@@ -358,6 +415,23 @@ export function BuilderDashboard() {
               );
             })}
         </div>
+        {exportProject ? (
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              left: -10000,
+              top: 0,
+              width: 1280,
+              pointerEvents: 'none',
+              opacity: 0,
+            }}
+          >
+            <div ref={exportRef}>
+              <JourneyMap projectOverride={exportProject} exportMode />
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
