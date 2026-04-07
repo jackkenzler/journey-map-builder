@@ -1,11 +1,9 @@
+# Journey Map Builder
 
-  # Interactive Student Journey Experience
+Build and publish interactive journey maps with configurable stages, steps, state labels, guided tours, comparison modals, and presentation-ready PNG exports.
 
-  This is a code bundle for Interactive Student Journey Experience. The original project is available at https://www.figma.com/design/a7oI9CRMDI2Y5PSJQHIsgo/Interactive-Student-Journey-Experience.
+## Running locally
 
-  ## Running the code
+Run `npm install` to install dependencies.
 
-  Run `npm i` to install the dependencies.
-
-  Run `npm run dev` to start the development server.
-  
+Run `npm run dev` to start the development server.
