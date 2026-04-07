@@ -3,6 +3,7 @@ import { Plus, Rocket } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { asuNondegreeProject } from '../../../builder';
+import { getBuilderRole } from '../../../builder/access';
 import { listPublishedJourneyMaps, saveDraftProject } from '../../../builder/draftStorage';
 import { listJourneyMapProjects } from '../../../builder/repository';
 import { hasSupabaseConfig } from '../../../builder/supabase';
@@ -24,6 +25,7 @@ export function BuilderDashboard() {
   const [projects, setProjects] = useState<JourneyMapProject[]>([]);
   const [newMapTitle, setNewMapTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const builderRole = getBuilderRole(user);
 
   const refreshProjects = () => {
     listJourneyMapProjects().then(setProjects);
@@ -160,6 +162,17 @@ export function BuilderDashboard() {
             </p>
           </div>
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
+            <p className="mb-[8px] text-[14px] text-[#767676]">App role</p>
+            <p className="text-[20px] text-[#191919]" style={{ fontWeight: 'bold' }}>
+              {builderRole === 'admin' ? 'Admin' : 'Editor'}
+            </p>
+            <p className="mt-[6px] text-[14px] leading-[1.5] text-[#767676]">
+              {builderRole === 'admin'
+                ? 'Full builder access with app-level administration.'
+                : 'Can create, edit, publish, and export journey maps.'}
+            </p>
+          </div>
+          <div className="rounded-[16px] border border-black/10 bg-white p-[20px] md:col-span-3">
             <p className="mb-[8px] text-[14px] text-[#767676]">Persistence</p>
             <p className="text-[20px] text-[#191919]" style={{ fontWeight: 'bold' }}>
               {hasSupabaseConfig ? 'Supabase configured' : 'Local draft registry'}

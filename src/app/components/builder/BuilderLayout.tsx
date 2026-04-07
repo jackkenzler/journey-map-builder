@@ -1,5 +1,6 @@
-import { ClerkLoaded, ClerkLoading, OrganizationSwitcher, SignedIn, SignedOut, SignIn, UserButton } from '@clerk/clerk-react';
+import { ClerkLoaded, ClerkLoading, SignedIn, SignedOut, SignIn, UserButton, useOrganization, useUser } from '@clerk/clerk-react';
 import { Link, Outlet } from 'react-router';
+import { getBuilderRole } from '../../../builder/access';
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -44,6 +45,51 @@ function ClerkSetupNotice() {
   );
 }
 
+function BuilderShell() {
+  const { user } = useUser();
+  const { organization } = useOrganization();
+  const builderRole = getBuilderRole(user);
+
+  return (
+    <>
+      <div className="border-b border-black/10 bg-white">
+        <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-[16px] px-[24px] py-[16px] md:px-[40px]">
+          <div className="flex items-center gap-[16px]">
+            <Link to="/app" className="text-[22px] text-[#191919]" style={{ fontWeight: 'bold' }}>
+              Journey Map Builder
+            </Link>
+            <Link
+              to="/preview/asu/nondegree-discovery"
+              target="_blank"
+              rel="noreferrer"
+              className="text-[14px] text-[#5f5f5f] transition-colors duration-150 hover:text-[#191919] active:opacity-70 cursor-pointer"
+            >
+              Open preview map
+            </Link>
+          </div>
+
+          <div className="flex items-center gap-[12px]">
+            <div className="hidden items-center gap-[8px] rounded-full border border-black/10 bg-[#FAFAFA] px-[12px] py-[8px] md:inline-flex">
+              <span className="text-[13px] text-[#767676]">Workspace</span>
+              <span className="text-[14px] text-[#191919]" style={{ fontWeight: 'bold' }}>
+                {organization?.name ?? 'Default workspace'}
+              </span>
+            </div>
+            <div className="hidden items-center rounded-full bg-[#FAFAFA] px-[12px] py-[8px] md:inline-flex">
+              <span className="text-[14px] text-[#191919]" style={{ fontWeight: 'bold' }}>
+                {builderRole === 'admin' ? 'Admin' : 'Editor'}
+              </span>
+            </div>
+            <UserButton />
+          </div>
+        </div>
+      </div>
+
+      <Outlet />
+    </>
+  );
+}
+
 export function BuilderLayout() {
   if (!clerkPublishableKey) {
     return <ClerkSetupNotice />;
@@ -67,37 +113,7 @@ export function BuilderLayout() {
         </SignedOut>
 
         <SignedIn>
-          <div className="border-b border-black/10 bg-white">
-            <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-[16px] px-[24px] py-[16px] md:px-[40px]">
-              <div className="flex items-center gap-[16px]">
-                <Link to="/app" className="text-[22px] text-[#191919]" style={{ fontWeight: 'bold' }}>
-                  Journey Map Builder
-                </Link>
-                <Link
-                  to="/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[14px] text-[#5f5f5f] transition-colors duration-150 hover:text-[#191919] active:opacity-70 cursor-pointer"
-                >
-                  Open preview map
-                </Link>
-              </div>
-
-              <div className="flex items-center gap-[12px]">
-                <OrganizationSwitcher
-                  hidePersonal
-                  appearance={{
-                    elements: {
-                      rootBox: 'shrink-0',
-                    },
-                  }}
-                />
-                <UserButton />
-              </div>
-            </div>
-          </div>
-
-          <Outlet />
+          <BuilderShell />
         </SignedIn>
       </ClerkLoaded>
     </div>
