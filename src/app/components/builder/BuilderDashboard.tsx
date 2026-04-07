@@ -42,14 +42,51 @@ export function BuilderDashboard() {
     [organization],
   );
 
-  const publishedSites = useMemo(() => listPublishedJourneyMaps(currentOrg.slug), [currentOrg.slug, projects]);
+  const starterProject = useMemo<JourneyMapProject>(
+    () => ({
+      organization: currentOrg,
+      map: {
+        ...JSON.parse(JSON.stringify(asuNondegreeProject.map)),
+        publishing: {
+          ...asuNondegreeProject.map.publishing,
+          siteSlug: asuNondegreeProject.map.slug,
+        },
+      },
+    }),
+    [currentOrg],
+  );
+
+  const orgProjects = useMemo(
+    () => projects.filter((project) => project.organization.slug === currentOrg.slug),
+    [currentOrg.slug, projects],
+  );
+
+  const displayedProjects = useMemo(() => {
+    if (orgProjects.length > 0) return orgProjects;
+    return [starterProject];
+  }, [orgProjects, starterProject]);
+
+  const publishedSites = useMemo(
+    () => listPublishedJourneyMaps(currentOrg.slug),
+    [currentOrg.slug, projects],
+  );
+
+  useEffect(() => {
+    if (orgProjects.length > 0) return;
+    saveDraftProject(starterProject);
+    refreshProjects();
+  }, [orgProjects.length, starterProject]);
 
   const handleCreateMap = () => {
     const title = newMapTitle.trim();
     if (!title) return;
 
     const slugBase = slugify(title) || `journey-map-${Date.now().toString(36)}`;
-    const existingSlugs = new Set(projects.filter((project) => project.organization.slug === currentOrg.slug).map((project) => project.map.slug));
+    const existingSlugs = new Set(
+      displayedProjects
+        .filter((project) => project.organization.slug === currentOrg.slug)
+        .map((project) => project.map.slug),
+    );
     let slug = slugBase;
     let counter = 2;
 
@@ -181,13 +218,24 @@ export function BuilderDashboard() {
           </div>
         )}
 
+        <div className="mb-[12px] flex items-center justify-between gap-[12px]">
+          <div>
+            <p className="text-[24px] text-[#191919]" style={{ fontWeight: 'bold' }}>
+              Your maps
+            </p>
+            <p className="text-[16px] leading-[1.5] text-[#5f5f5f]">
+              Open a builder draft, preview a public version, or start from the starter template for this organization.
+            </p>
+          </div>
+        </div>
+
         <div className="grid gap-[16px]">
-          {projects
-            .filter((project) => project.organization.slug === currentOrg.slug)
-            .map((project) => {
+          {displayedProjects.map((project) => {
               const publishedSite = publishedSites.find((site) => site.mapSlug === project.map.slug);
               const previewPath = `/preview/${project.organization.slug}/${project.map.slug}`;
               const publishedPath = publishedSite ? `/published/${publishedSite.orgSlug}/${publishedSite.siteSlug}` : null;
+              const isStarterTemplate =
+                orgProjects.length === 0 && project.map.slug === asuNondegreeProject.map.slug;
 
               return (
                 <div
@@ -198,7 +246,11 @@ export function BuilderDashboard() {
                     <div className="flex flex-col gap-[8px]">
                       <div className="inline-flex w-fit items-center gap-[8px] rounded-full bg-[#FAFAFA] px-[12px] py-[6px] text-[13px] text-[#5f5f5f]">
                         <Rocket className="size-[14px]" />
-                        {publishedSite ? `Published as /published/${publishedSite.orgSlug}/${publishedSite.siteSlug}` : 'Draft only'}
+                        {publishedSite
+                          ? `Published as /published/${publishedSite.orgSlug}/${publishedSite.siteSlug}`
+                          : isStarterTemplate
+                            ? 'Starter template'
+                            : 'Draft only'}
                       </div>
                       <p className="text-[28px] leading-[1.05] text-[#191919]" style={{ fontWeight: 'bold' }}>
                         {project.map.title}
@@ -206,6 +258,11 @@ export function BuilderDashboard() {
                       <p className="text-[16px] leading-[1.5] text-[#5f5f5f]">
                         {project.map.stages.length} stages, {project.map.currentStateMarkers.length} {project.map.stateLabels.current.toLowerCase()} steps, {project.map.futureStateMarkers.length} {project.map.stateLabels.future.toLowerCase()} steps
                       </p>
+                      {isStarterTemplate ? (
+                        <p className="text-[14px] leading-[1.5] text-[#767676]">
+                          This starter map is available immediately. Open builder to customize it for {currentOrg.name}.
+                        </p>
+                      ) : null}
                     </div>
 
                     <div className="flex flex-wrap gap-[10px]">
@@ -230,7 +287,7 @@ export function BuilderDashboard() {
                         className="rounded-full bg-[#8C1D40] px-[18px] py-[10px] text-[14px] text-white transition-all duration-150 hover:bg-[#7a1938] active:scale-[0.98] cursor-pointer"
                         style={{ fontWeight: 'bold' }}
                       >
-                        Open builder
+                        {isStarterTemplate ? 'Open builder editor' : 'Open builder editor'}
                       </Link>
                     </div>
                   </div>
