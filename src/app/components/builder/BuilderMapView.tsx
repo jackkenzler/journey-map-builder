@@ -725,6 +725,8 @@ export function BuilderMapView() {
             <div className="ml-auto">
               <Link
                 to={previewHref}
+                target="_blank"
+                rel="noreferrer"
                 className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveLinkClassName}`}
                 style={{ fontWeight: 'bold' }}
               >

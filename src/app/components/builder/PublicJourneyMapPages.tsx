@@ -1,9 +1,32 @@
+import { SignedIn } from '@clerk/clerk-react';
+import { PenSquare } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { loadPublishedJourneyMap } from '../../../builder/draftStorage';
 import { getJourneyMapProject } from '../../../builder/repository';
 import type { JourneyMapProject } from '../../../builder/types';
 import { JourneyMap } from '../JourneyMap';
+
+function FloatingBuilderButton({
+  href,
+}: {
+  href: string;
+}) {
+  return (
+    <SignedIn>
+      <div className="pointer-events-none fixed left-1/2 top-[18px] z-50 -translate-x-1/2">
+        <Link
+          to={href}
+          className="pointer-events-auto inline-flex items-center gap-[8px] rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] shadow-[0_20px_40px_rgba(0,0,0,0.08)] transition-all duration-150 hover:bg-[#f3f3f3] active:scale-[0.98] cursor-pointer"
+          style={{ fontWeight: 'bold' }}
+        >
+          <PenSquare className="size-[16px]" />
+          Back to builder editor
+        </Link>
+      </div>
+    </SignedIn>
+  );
+}
 
 function LoadingState({ label }: { label: string }) {
   return (
@@ -47,7 +70,12 @@ export function JourneyMapPreviewPage() {
     return <MissingState title="Preview not found" body="This journey map preview does not exist yet." />;
   }
 
-  return <JourneyMap projectOverride={project} />;
+  return (
+    <>
+      <FloatingBuilderButton href={`/app/orgs/${project.organization.slug}/maps/${project.map.slug}`} />
+      <JourneyMap projectOverride={project} />
+    </>
+  );
 }
 
 export function PublishedJourneyMapPage() {

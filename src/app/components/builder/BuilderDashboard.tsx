@@ -136,6 +136,8 @@ export function BuilderDashboard() {
             </div>
             <Link
               to="/"
+              target="_blank"
+              rel="noreferrer"
               className="rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
               style={{ fontWeight: 'bold' }}
             >
@@ -268,6 +270,8 @@ export function BuilderDashboard() {
                     <div className="flex flex-wrap gap-[10px]">
                       <Link
                         to={previewPath}
+                        target="_blank"
+                        rel="noreferrer"
                         className="rounded-full border border-black/10 bg-[#FAFAFA] px-[16px] py-[10px] text-[14px] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
                         style={{ fontWeight: 'bold' }}
                       >

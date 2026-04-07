@@ -31,6 +31,8 @@ function ClerkSetupNotice() {
         <div className="mt-[24px] flex gap-[12px]">
           <Link
             to="/"
+            target="_blank"
+            rel="noreferrer"
             className="rounded-full border border-black/10 bg-[#FAFAFA] px-[16px] py-[10px] text-[14px] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
             style={{ fontWeight: 'bold' }}
           >
@@ -71,7 +73,12 @@ export function BuilderLayout() {
                 <Link to="/app" className="text-[22px] text-[#191919]" style={{ fontWeight: 'bold' }}>
                   Journey Map Builder
                 </Link>
-                <Link to="/" className="text-[14px] text-[#5f5f5f] transition-colors duration-150 hover:text-[#191919] active:opacity-70 cursor-pointer">
+                <Link
+                  to="/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[14px] text-[#5f5f5f] transition-colors duration-150 hover:text-[#191919] active:opacity-70 cursor-pointer"
+                >
                   Open preview map
                 </Link>
               </div>
