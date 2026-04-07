@@ -87,6 +87,50 @@ interface JourneyMapProps {
   projectOverride?: JourneyMapProject;
 }
 
+function getGradientTransitionOffsets(colorCount: number) {
+  if (colorCount <= 1) return [1];
+  const defaultOffsets = [0.15, 0.61, 0.69, 0.841505];
+  if (colorCount - 1 <= defaultOffsets.length) {
+    return defaultOffsets.slice(0, colorCount - 1);
+  }
+
+  const start = 0.15;
+  const end = 0.86;
+  const step = (end - start) / (colorCount - 2);
+  return Array.from({ length: colorCount - 1 }, (_, index) =>
+    Number((index === colorCount - 2 ? end : start + step * index).toFixed(6)),
+  );
+}
+
+function getGradientColorStops(colors: string[]) {
+  if (colors.length === 0) return [];
+  if (colors.length === 1) {
+    return [
+      { color: colors[0], offset: 0 },
+      { color: colors[0], offset: 1 },
+    ];
+  }
+
+  const transitions = getGradientTransitionOffsets(colors.length);
+  const blendWindow = 0.028;
+  const stops: Array<{ color: string; offset: number }> = [{ color: colors[0], offset: 0 }];
+
+  colors.forEach((color, index) => {
+    if (index === 0) return;
+
+    const pivot = transitions[index - 1] ?? 1;
+    const prevColor = colors[index - 1];
+    const startBlend = Number(Math.max(0, pivot - blendWindow).toFixed(6));
+    const endBlend = Number(Math.min(1, pivot + blendWindow).toFixed(6));
+
+    stops.push({ color: prevColor, offset: startBlend });
+    stops.push({ color, offset: endBlend });
+  });
+
+  stops.push({ color: colors[colors.length - 1], offset: 1 });
+  return stops;
+}
+
 export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
   const [activeProject] = useState(
     () =>
@@ -115,7 +159,9 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
   const roadRef = useRef<SVGPathElement>(null);
   const dashRef = useRef<SVGPathElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const stageColors = activeMap.theme.stageColors;
+  const stageColors = activeMap.stages.map((stage) => stage.color).filter(Boolean);
+  const gradientColors = stageColors.length > 0 ? stageColors : activeMap.theme.stageColors;
+  const gradientColorStops = getGradientColorStops(gradientColors);
   const stateLabels = activeMap.stateLabels ?? { current: 'Current state', future: 'Future state' };
   const currentSummaryData = activeMap.currentSummaries.map((stage) => ({
     num: stage.number,
@@ -176,7 +222,10 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
   const mobileRoadStartX = isMobileLayout ? (containerWidth - mobileTrackWidth) / 2 : 0;
   const labelOffset = isMobileLayout ? 44 : LABEL_OFFSET;
   const summaryGap = isMobileLayout ? 18 : 30;
-  const features = activeMap.features;
+  const features = {
+    summaryPanelEnabled: true,
+    ...activeMap.features,
+  };
   const availableStates = ([
     features.currentStateEnabled ? 'current' : null,
     features.futureStateEnabled ? 'future' : null,
@@ -476,13 +525,13 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
           >
             <defs>
               <linearGradient id="pathGradient" gradientUnits="userSpaceOnUse" x1="110" x2="1347" y1="297.5" y2="297.5">
-                <stop stopColor="#78BE20" offset="0" />
-                <stop stopColor="#00A3E0" offset="0.15" />
-                <stop stopColor="#00A3E0" offset="0.528436" />
-                <stop stopColor="#FF7F32" offset="0.61" />
-                <stop stopColor="#E74973" offset="0.69" />
-                <stop stopColor="#FFC627" offset="0.841505" />
-                <stop stopColor="#FFC627" offset="1" />
+                {gradientColorStops.map((stop, index) => (
+                  <stop
+                    key={`${stop.color}-${stop.offset}-${index}`}
+                    stopColor={stop.color}
+                    offset={stop.offset}
+                  />
+                ))}
               </linearGradient>
             </defs>
 
@@ -836,33 +885,41 @@ export function JourneyMap({ projectOverride }: JourneyMapProps = {}) {
         </div>
 
         {/* Summary Section */}
-        <div
-          className="w-full max-w-[1200px] px-[24px] relative z-10"
-          style={{
-            opacity: showElements ? (markersTransitioning ? 0 : 1) : 0,
-            transform: showElements ? 'translateY(0)' : 'translateY(20px)',
-            transition: markersTransitioning
-              ? 'opacity 0.25s ease'
-              : 'opacity 0.25s ease, transform 0.6s ease 0.2s',
-          }}
-        >
-          <div className="bg-white/80 backdrop-blur-[25px] rounded-[12px] border border-black/10 shadow-[0px_10px_22px_0px_rgba(0,0,0,0.05),0px_40px_40px_0px_rgba(0,0,0,0.04)]">
-            <div className={`grid p-[24px] md:p-[32px] ${isMobileLayout ? 'grid-cols-1' : 'grid-cols-5'}`} style={{ gap: summaryGap }}>
-              {summaryData.map((stage) => (
-                <div key={stage.num} className="flex-1 flex flex-col gap-[16px]">
-                  <div className="flex flex-col gap-[4px]">
-                    <p className="text-[40px] tracking-[-1.4px] leading-none" style={{ color: stage.color, fontWeight: 'bold' }}>{stage.num}</p>
-                    <p className="text-[24px] text-black tracking-[-0.84px] leading-[1.1]" style={{ fontWeight: 'bold' }}>{stage.name}</p>
+        {features.summaryPanelEnabled && (
+          <div
+            className="w-full max-w-[1200px] px-[24px] relative z-10"
+            style={{
+              opacity: showElements ? (markersTransitioning ? 0 : 1) : 0,
+              transform: showElements ? 'translateY(0)' : 'translateY(20px)',
+              transition: markersTransitioning
+                ? 'opacity 0.25s ease'
+                : 'opacity 0.25s ease, transform 0.6s ease 0.2s',
+            }}
+          >
+            <div className="bg-white/80 backdrop-blur-[25px] rounded-[12px] border border-black/10 shadow-[0px_10px_22px_0px_rgba(0,0,0,0.05),0px_40px_40px_0px_rgba(0,0,0,0.04)]">
+              <div
+                className={`grid p-[24px] md:p-[32px] ${isMobileLayout ? 'grid-cols-1' : ''}`}
+                style={{
+                  gap: summaryGap,
+                  ...(isMobileLayout ? {} : { gridTemplateColumns: `repeat(${Math.max(summaryData.length, 1)}, minmax(0, 1fr))` }),
+                }}
+              >
+                {summaryData.map((stage) => (
+                  <div key={stage.num} className="min-w-0 flex flex-col gap-[16px]">
+                    <div className="flex flex-col gap-[4px]">
+                      <p className="text-[40px] tracking-[-1.4px] leading-none" style={{ color: stage.color, fontWeight: 'bold' }}>{stage.num}</p>
+                      <p className="text-[24px] text-black tracking-[-0.84px] leading-[1.1]" style={{ fontWeight: 'bold' }}>{stage.name}</p>
+                    </div>
+                    <div className="relative">
+                      <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-full" style={{ backgroundColor: stage.color }} />
+                      <p className="pl-[16px] text-[16px] text-[#191919] opacity-60 leading-[1.4]">{stage.desc}</p>
+                    </div>
                   </div>
-                  <div className="relative">
-                    <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-full" style={{ backgroundColor: stage.color }} />
-                    <p className="pl-[16px] text-[16px] text-[#191919] opacity-60 leading-[1.4]">{stage.desc}</p>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Platform Modal */}

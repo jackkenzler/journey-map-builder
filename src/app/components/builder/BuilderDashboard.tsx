@@ -18,6 +18,26 @@ function slugify(value: string) {
     .slice(0, 40);
 }
 
+function getOrgSlugFallback(name?: string | null) {
+  return name ? slugify(name) : '';
+}
+
+function doesProjectBelongToOrg(
+  project: JourneyMapProject,
+  org: { id: string; slug: string; name: string },
+) {
+  const projectSlugFallback = getOrgSlugFallback(project.organization.name);
+  const orgSlugFallback = getOrgSlugFallback(org.name);
+
+  return (
+    project.organization.id === org.id ||
+    project.organization.slug === org.slug ||
+    project.organization.slug === orgSlugFallback ||
+    projectSlugFallback === org.slug ||
+    projectSlugFallback === orgSlugFallback
+  );
+}
+
 export function BuilderDashboard() {
   const { user } = useUser();
   const { organization } = useOrganization();
@@ -62,26 +82,36 @@ export function BuilderDashboard() {
     [currentOrg],
   );
 
-  const orgProjects = useMemo(
-    () => projects.filter((project) => project.organization.slug === currentOrg.slug),
-    [currentOrg.slug, projects],
+  const publishedSites = useMemo(
+    () => listPublishedJourneyMaps(),
+    [projects],
+  );
+
+  const projectPool = useMemo(() => {
+    const merged = new Map<string, JourneyMapProject>();
+
+    [...projects, ...publishedSites.map((site) => site.project)].forEach((project) => {
+      merged.set(`${project.organization.slug}:${project.map.slug}`, project);
+    });
+
+    return Array.from(merged.values());
+  }, [projects, publishedSites]);
+
+  const orgScopedProjects = useMemo(
+    () => projectPool.filter((project) => doesProjectBelongToOrg(project, currentOrg)),
+    [currentOrg, projectPool],
   );
 
   const displayedProjects = useMemo(() => {
-    if (orgProjects.length > 0) return orgProjects;
+    if (orgScopedProjects.length > 0) return orgScopedProjects;
     return [starterProject];
-  }, [orgProjects, starterProject]);
-
-  const publishedSites = useMemo(
-    () => listPublishedJourneyMaps(currentOrg.slug),
-    [currentOrg.slug, projects],
-  );
+  }, [orgScopedProjects, starterProject]);
 
   useEffect(() => {
-    if (orgProjects.length > 0) return;
+    if (orgScopedProjects.length > 0) return;
     saveDraftProject(starterProject);
     refreshProjects();
-  }, [orgProjects.length, starterProject]);
+  }, [orgScopedProjects.length, starterProject]);
 
   const handleCreateMap = () => {
     const title = newMapTitle.trim();
@@ -90,7 +120,7 @@ export function BuilderDashboard() {
     const slugBase = slugify(title) || `journey-map-${Date.now().toString(36)}`;
     const existingSlugs = new Set(
       displayedProjects
-        .filter((project) => project.organization.slug === currentOrg.slug)
+        .filter((project) => doesProjectBelongToOrg(project, currentOrg))
         .map((project) => project.map.slug),
     );
     let slug = slugBase;
@@ -121,6 +151,13 @@ export function BuilderDashboard() {
     };
 
     saveDraftProject(newProject);
+    setProjects((current) => {
+      const merged = new Map<string, JourneyMapProject>();
+      [...current, newProject].forEach((project) => {
+        merged.set(`${project.organization.slug}:${project.map.slug}`, project);
+      });
+      return Array.from(merged.values());
+    });
     setNewMapTitle('');
     setCreating(false);
     refreshProjects();
@@ -251,11 +288,15 @@ export function BuilderDashboard() {
 
         <div className="grid gap-[16px]">
           {displayedProjects.map((project) => {
-              const publishedSite = publishedSites.find((site) => site.mapSlug === project.map.slug);
+              const publishedSite = publishedSites.find(
+                (site) =>
+                  site.mapSlug === project.map.slug &&
+                  doesProjectBelongToOrg(site.project, currentOrg),
+              );
               const previewPath = `/preview/${project.organization.slug}/${project.map.slug}`;
               const publishedPath = publishedSite ? `/published/${publishedSite.orgSlug}/${publishedSite.siteSlug}` : null;
               const isStarterTemplate =
-                orgProjects.length === 0 && project.map.slug === asuNondegreeProject.map.slug;
+                orgScopedProjects.length === 0 && project.map.slug === asuNondegreeProject.map.slug;
 
               return (
                 <div

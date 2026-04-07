@@ -58,9 +58,9 @@ const interactiveLinkClassName =
 const interactiveButtonClassName =
   'transition-all duration-150 hover:brightness-[0.98] active:scale-[0.98] cursor-pointer';
 const builderTabsListClassName =
-  'h-auto w-full flex-wrap justify-start gap-[8px] border-b border-black/10 bg-transparent p-0';
+  'inline-flex h-auto w-full max-w-full flex-wrap items-center gap-[8px] rounded-full border border-[#D0D0D0] bg-[#FAFAFA] p-[8px]';
 const builderTabsTriggerClassName =
-  'min-h-[48px] rounded-full px-[18px] py-[10px] text-[16px] font-bold text-[#747474] data-[state=active]:bg-[#8C1D40] data-[state=active]:text-white data-[state=active]:shadow-[0px_20px_12px_rgba(0,0,0,0.01),0px_9px_9px_rgba(0,0,0,0.03),0px_2px_5px_rgba(0,0,0,0.06)] hover:text-[#191919]';
+  'min-h-[46px] min-w-[160px] flex-1 rounded-full px-[18px] py-[10px] text-[16px] font-bold text-[#747474] data-[state=active]:bg-[#8C1D40] data-[state=active]:text-white data-[state=active]:shadow-[0px_20px_12px_rgba(0,0,0,0.01),0px_9px_9px_rgba(0,0,0,0.03),0px_2px_5px_rgba(0,0,0,0.06)] hover:bg-black/5 hover:text-[#191919]';
 
 function slugify(value: string) {
   return value
@@ -117,6 +117,14 @@ function applyStepType<T extends JourneyMarkerConfig>(marker: T, type: StepType)
     icon: undefined,
     labelVariant: 'interactive-card',
   };
+}
+
+function removeInteractiveCards<T extends JourneyMarkerConfig>(markers: T[]) {
+  return markers.map((marker) =>
+    marker.labelVariant === 'interactive-card'
+      ? { ...marker, labelVariant: 'card' }
+      : marker,
+  );
 }
 
 function buildLabelConfigPatch(
@@ -380,6 +388,7 @@ export function BuilderMapView() {
   const [draftMap, setDraftMap] = useState<JourneyMapConfig | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isExportingPng, setIsExportingPng] = useState(false);
+  const [activeStepsTab, setActiveStepsTab] = useState<StateKey>('current');
   const exportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -390,6 +399,23 @@ export function BuilderMapView() {
     if (!project) return;
     setDraftMap(project.map);
   }, [project]);
+
+  useEffect(() => {
+    if (!draftMap) return;
+    const features = {
+      summaryPanelEnabled: true,
+      ...draftMap.features,
+    };
+    const nextVisibleStates = ([
+      features.currentStateEnabled ? 'current' : null,
+      features.futureStateEnabled ? 'future' : null,
+    ].filter(Boolean) as StateKey[]);
+
+    if (nextVisibleStates.length === 0) return;
+    if (!nextVisibleStates.includes(activeStepsTab)) {
+      setActiveStepsTab(nextVisibleStates[0]);
+    }
+  }, [activeStepsTab, draftMap]);
 
   const updateDraftMap = (updater: (current: JourneyMapConfig) => JourneyMapConfig) => {
     setDraftMap((current) => (current ? updater(current) : current));
@@ -642,6 +668,14 @@ export function BuilderMapView() {
   if (!draftMap) return null;
 
   const stateLabels = draftMap.stateLabels ?? { current: 'State 1', future: 'State 2' };
+  const features = {
+    summaryPanelEnabled: true,
+    ...draftMap.features,
+  };
+  const visibleStepStates = ([
+    features.currentStateEnabled ? 'current' : null,
+    features.futureStateEnabled ? 'future' : null,
+  ].filter(Boolean) as StateKey[]);
   const publishing = draftMap.publishing ?? { siteSlug: draftMap.slug };
   const previewHref = `/preview/${project.organization.slug}/${draftMap.slug}`;
   const publishedHref = `/published/${project.organization.slug}/${publishing.siteSlug}`;
@@ -940,8 +974,9 @@ export function BuilderMapView() {
                 <SectionCard title="Feature visibility" description="Turn key map behaviors on or off without changing the content itself.">
                   <div className="grid gap-[12px]">
                     {[
-                      ['currentStateEnabled', `Show ${stateLabels.current}`],
-                      ['futureStateEnabled', `Show ${stateLabels.future}`],
+                      ['currentStateEnabled', 'Show current state'],
+                      ['futureStateEnabled', 'Show future state'],
+                      ['summaryPanelEnabled', 'Show summary panel'],
                       ['guidedTourEnabled', 'Show guided tour'],
                       ['comparisonModalEnabled', 'Show comparison modal'],
                     ].map(([key, label]) => (
@@ -951,14 +986,23 @@ export function BuilderMapView() {
                       >
                         <span className="text-[16px] text-[#191919]">{label}</span>
                         <Switch
-                          checked={draftMap.features[key as keyof typeof draftMap.features]}
+                          checked={features[key as keyof typeof features]}
                           onCheckedChange={(checked) =>
                             updateDraftMap((current) => ({
                               ...current,
                               features: {
+                                summaryPanelEnabled: true,
                                 ...current.features,
                                 [key]: checked,
                               },
+                              currentStateMarkers:
+                                key === 'comparisonModalEnabled' && !checked
+                                  ? removeInteractiveCards(current.currentStateMarkers)
+                                  : current.currentStateMarkers,
+                              futureStateMarkers:
+                                key === 'comparisonModalEnabled' && !checked
+                                  ? removeInteractiveCards(current.futureStateMarkers)
+                                  : current.futureStateMarkers,
                             }))
                           }
                         />
@@ -1052,6 +1096,7 @@ export function BuilderMapView() {
                           }))
                         }
                         className={inputClassName}
+                        disabled={!features.guidedTourEnabled}
                       />
                     </label>
                     <label className="grid gap-[8px]">
@@ -1066,6 +1111,7 @@ export function BuilderMapView() {
                         }
                         rows={4}
                         className={inputClassName}
+                        disabled={!features.guidedTourEnabled}
                       />
                     </label>
 
@@ -1084,6 +1130,7 @@ export function BuilderMapView() {
                             }))
                           }
                           className={inputClassName}
+                          disabled={!features.guidedTourEnabled}
                         />
                       </label>
                       <label className="grid gap-[8px]">
@@ -1100,9 +1147,15 @@ export function BuilderMapView() {
                             }))
                           }
                           className={inputClassName}
+                          disabled={!features.guidedTourEnabled}
                         />
                       </label>
                     </div>
+                    {!features.guidedTourEnabled ? (
+                      <p className="text-[14px] leading-[1.5] text-[#767676]">
+                        Turn guided tour visibility back on to edit the popover content and anchor steps.
+                      </p>
+                    ) : null}
                   </div>
                 </SectionCard>
               </div>
@@ -1253,16 +1306,33 @@ export function BuilderMapView() {
           </TabsContent>
 
           <TabsContent value="steps">
-            <Tabs defaultValue="current" className="gap-[16px]">
-              <TabsList className={builderTabsListClassName}>
-                <TabsTrigger value="current" className={builderTabsTriggerClassName}>
-                  {stateLabels.current}
-                </TabsTrigger>
-                <TabsTrigger value="future" className={builderTabsTriggerClassName}>
-                  {stateLabels.future}
-                </TabsTrigger>
-              </TabsList>
+            {visibleStepStates.length === 0 ? (
+              <SectionCard
+                title="Steps"
+                description="Turn on current state or future state in Feature visibility to edit their steps."
+              >
+                <p className="text-[16px] leading-[1.5] text-[#5f5f5f]">
+                  Both states are currently hidden, so there are no editable step groups to show here.
+                </p>
+              </SectionCard>
+            ) : (
+            <Tabs value={activeStepsTab} onValueChange={(value) => setActiveStepsTab(value as StateKey)} className="gap-[16px]">
+              {visibleStepStates.length > 1 ? (
+                <TabsList className={builderTabsListClassName}>
+                  {features.currentStateEnabled ? (
+                    <TabsTrigger value="current" className={builderTabsTriggerClassName}>
+                      {stateLabels.current}
+                    </TabsTrigger>
+                  ) : null}
+                  {features.futureStateEnabled ? (
+                    <TabsTrigger value="future" className={builderTabsTriggerClassName}>
+                      {stateLabels.future}
+                    </TabsTrigger>
+                  ) : null}
+                </TabsList>
+              ) : null}
 
+              {features.currentStateEnabled ? (
               <TabsContent value="current">
                 <SectionCard
                   title={`${stateLabels.current} steps`}
@@ -1339,7 +1409,11 @@ export function BuilderMapView() {
                                   className={mutedInputClassName}
                                 >
                                   {stepTypeOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
+                                    <option
+                                      key={option.value}
+                                      value={option.value}
+                                      disabled={!features.comparisonModalEnabled && option.value === 'interactive-card'}
+                                    >
                                       {option.label}
                                     </option>
                                   ))}
@@ -1494,7 +1568,9 @@ export function BuilderMapView() {
                   </div>
                 </SectionCard>
               </TabsContent>
+              ) : null}
 
+              {features.futureStateEnabled ? (
               <TabsContent value="future">
                 <SectionCard
                   title={`${stateLabels.future} steps`}
@@ -1571,7 +1647,11 @@ export function BuilderMapView() {
                                   className={mutedInputClassName}
                                 >
                                   {stepTypeOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
+                                    <option
+                                      key={option.value}
+                                      value={option.value}
+                                      disabled={!features.comparisonModalEnabled && option.value === 'interactive-card'}
+                                    >
                                       {option.label}
                                     </option>
                                   ))}
@@ -1775,7 +1855,9 @@ export function BuilderMapView() {
                   </div>
                 </SectionCard>
               </TabsContent>
+              ) : null}
             </Tabs>
+            )}
           </TabsContent>
 
           <TabsContent value="preview">

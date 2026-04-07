@@ -38,6 +38,7 @@ export const asuNondegreeProject: JourneyMapProject = {
       futureStateEnabled: true,
       comparisonModalEnabled: true,
       guidedTourEnabled: true,
+      summaryPanelEnabled: true,
     },
     stages: [
       {

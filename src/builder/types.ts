@@ -82,6 +82,7 @@ export interface JourneyMapFeaturesConfig {
   futureStateEnabled: boolean;
   comparisonModalEnabled: boolean;
   guidedTourEnabled: boolean;
+  summaryPanelEnabled: boolean;
 }
 
 export interface JourneyMapStateLabelsConfig {
