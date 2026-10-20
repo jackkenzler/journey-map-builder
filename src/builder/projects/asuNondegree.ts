@@ -4,11 +4,6 @@ import type { JourneyMapProject } from '../types';
 // The current app still reads hardcoded component data, but this file establishes
 // the long-term source-of-truth shape we can migrate the renderer onto next.
 export const asuNondegreeProject: JourneyMapProject = {
-  organization: {
-    id: 'asu',
-    slug: 'asu',
-    name: 'Arizona State University',
-  },
   map: {
     id: 'nondegree-discovery',
     slug: 'nondegree-discovery',

@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import imgLogo from 'figma:asset/ed52d950de27f23ebc18b225e72eff9d85fd6cb6.png';
 import warningIcon from '../../../warningIcon.svg';
@@ -9,7 +10,7 @@ import { journeyStages } from '../data/journeyData';
 import { comparisonImageAssetsByFilename } from '../data/comparisonImages';
 import type { JourneyMapProject } from '../../builder';
 import { asuNondegreeProject } from '../../builder';
-import { loadDraftProject } from '../../builder/draftStorage';
+import { normalizeMapConfig } from '../../builder/normalize';
 
 // The road path — extended well beyond edges so it bleeds off-screen
 const ROAD_PATH = "M-800 438H254.925C327.274 438 385.925 379.349 385.925 307V143.038C385.925 72.8767 442.801 16 512.962 16C583.123 16 640 72.8767 640 143.038V457.203C640 527.231 696.769 584 766.797 584C836.825 584 893.594 527.231 893.594 457.203V253C893.594 180.651 952.245 122 1024.59 122H2100";
@@ -86,6 +87,8 @@ interface SelectedStep {
 interface JourneyMapProps {
   projectOverride?: JourneyMapProject;
   exportMode?: boolean;
+  /** Keeps the selected persona in the page URL (?persona=) so a specific view can be shared. */
+  syncPersonaToUrl?: boolean;
 }
 
 function getGradientTransitionOffsets(colorCount: number) {
@@ -132,14 +135,13 @@ function getGradientColorStops(colors: string[]) {
   return stops;
 }
 
-export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapProps = {}) {
-  const [activeProject] = useState(
-    () =>
-      projectOverride ??
-      loadDraftProject(asuNondegreeProject.organization.slug, asuNondegreeProject.map.slug) ??
-      asuNondegreeProject,
-  );
-  const activeMap = activeProject.map;
+export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToUrl = false }: JourneyMapProps = {}) {
+  const activeProject = projectOverride ?? asuNondegreeProject;
+  const activeMap = useMemo(() => normalizeMapConfig(activeProject.map), [activeProject.map]);
+  const [activePersonaId, setActivePersonaId] = useState<string | null>(() => {
+    if (!syncPersonaToUrl || typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('persona');
+  });
   const [journeyState, setJourneyState] = useState<JourneyState>('future');
   const [markersTransitioning, setMarkersTransitioning] = useState(false);
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
@@ -170,11 +172,15 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
     color: stage.color,
     desc: stage.description,
   }));
-  const futureSummaryData = activeMap.futureSummaries.map((stage) => ({
+  const personas = activeMap.futurePersonas ?? [];
+  const personasEnabled = Boolean(activeMap.features.futurePersonasEnabled) && personas.length > 0;
+  const activePersona = personasEnabled ? personas.find((persona) => persona.id === activePersonaId) : undefined;
+  const futureMarkerConfigs = activePersona?.markers ?? activeMap.futureStateMarkers;
+  const futureSummaryData = activeMap.futureSummaries.map((stage, index) => ({
     num: stage.number,
     name: stage.name,
     color: stage.color,
-    desc: stage.description,
+    desc: activePersona?.summaryOverrides?.[activeMap.stages[index]?.id ?? '']?.trim() || stage.description,
   }));
   const currentStateMarkers: CurrentStateMarker[] = activeMap.currentStateMarkers.map((marker) => ({
     desktopPct: marker.desktop.pct,
@@ -189,7 +195,7 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
   }));
   const stageIdxById = new Map(activeMap.stages.map((stage, index) => [stage.id, index]));
   const stepCountsByStageId = new Map<string, number>();
-  const futureStateMarkers: FutureStateMarker[] = activeMap.futureStateMarkers.map((marker) => {
+  const futureStateMarkers: FutureStateMarker[] = futureMarkerConfigs.map((marker) => {
     const stageIdx = stageIdxById.get(marker.stageId) ?? 0;
     const stepIdx = stepCountsByStageId.get(marker.stageId) ?? 0;
     stepCountsByStageId.set(marker.stageId, stepIdx + 1);
@@ -322,6 +328,26 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
     }, 250);
   };
 
+  const handlePersonaChange = (personaId: string | null) => {
+    if (personaId === (activePersona?.id ?? null)) return;
+    setSelectedStep(null);
+    setHoveredDot(null);
+    setHighlightedPainPoint(null);
+    setShowPopover(false);
+    setMarkersTransitioning(true);
+    setTimeout(() => {
+      setActivePersonaId(personaId);
+      setMarkersTransitioning(false);
+    }, 250);
+
+    if (syncPersonaToUrl && typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (personaId) url.searchParams.set('persona', personaId);
+      else url.searchParams.delete('persona');
+      window.history.replaceState(null, '', url);
+    }
+  };
+
   // Track container width
   useEffect(() => {
     const el = containerRef.current;
@@ -354,7 +380,7 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
   }, [availableStates, journeyState]);
 
   // Compute all positions from the path using getPointAtLength
-  const computePositions = useCallback(() => {
+  const computePositions = () => {
     const path = roadRef.current;
     if (!path) return;
 
@@ -373,17 +399,25 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
         return { x: pt.x, y: pt.y };
       })
     );
-  }, []);
+  };
+  const computePositionsRef = useRef(computePositions);
+  computePositionsRef.current = computePositions;
 
-  // Recompute positions when container resizes
-  useEffect(() => {
-    computePositions();
-  }, [containerWidth, computePositions]);
+  // Recompute positions whenever the layout or the visible step set changes. This runs before paint
+  // so switching personas never shows markers at stale positions.
+  const markerPlacementKey = JSON.stringify([
+    isMobileLayout,
+    currentStateMarkers.map(getCurrentMarkerPct),
+    futureStateMarkers.map(getFutureMarkerPct),
+  ]);
+  useLayoutEffect(() => {
+    computePositionsRef.current();
+  }, [containerWidth, markerPlacementKey]);
 
   // Path draw-in animation
   useEffect(() => {
     if (exportMode) {
-      computePositions();
+      computePositionsRef.current();
       setShowElements(true);
       setShowPopover(false);
       return;
@@ -392,7 +426,7 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
     const road = roadRef.current;
     if (!road) return;
 
-    computePositions();
+    computePositionsRef.current();
 
     const totalLength = road.getTotalLength();
     road.style.strokeDasharray = `${totalLength}`;
@@ -426,12 +460,36 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
 
     const timer = setTimeout(() => requestAnimationFrame(animate), 300);
     return () => clearTimeout(timer);
-  }, [computePositions, exportMode]);
+  }, [exportMode]);
 
   const markersVisible = showElements && !markersTransitioning;
   const summaryData = journeyState === 'current' ? currentSummaryData : futureSummaryData;
   const desktopGuidedTourIndex = Math.max(0, activeMap.futureStateMarkers.findIndex(marker => marker.id === activeMap.guidedTour.desktopAnchorMarkerId));
   const mobileGuidedTourIndex = Math.max(0, activeMap.futureStateMarkers.findIndex(marker => marker.id === activeMap.guidedTour.mobileAnchorMarkerId));
+
+  const showPersonaPicker = journeyState === 'future' && features.futureStateEnabled && personasEnabled;
+  const personaPicker = showPersonaPicker ? (
+    <label className="flex min-w-0 items-center gap-[12px]">
+      <span className={`shrink-0 text-[14px] text-[#767676] ${isMobileLayout ? '' : 'hidden xl:inline'}`}>Persona</span>
+      <span className="relative block min-w-0 flex-1">
+        <select
+          value={activePersona?.id ?? ''}
+          onChange={(event) => handlePersonaChange(event.target.value || null)}
+          className="h-[52px] w-full min-w-[170px] max-w-[300px] cursor-pointer appearance-none truncate rounded-full border border-[#D0D0D0] bg-[#FAFAFA] py-[8px] pl-[20px] pr-[48px] text-[16px] text-[#191919] outline-none transition-colors duration-150 hover:bg-[#F0F0F0] focus-visible:ring-2 focus-visible:ring-[#8C1D40]"
+          style={{ fontWeight: 'bold', fontFamily: 'Arial, sans-serif' }}
+          aria-label="Choose a persona"
+        >
+          <option value="">{activeMap.futureDefaultPersonaName?.trim() || 'Default'}</option>
+          {personas.map((persona) => (
+            <option key={persona.id} value={persona.id}>
+              {persona.name.trim() || 'Untitled persona'}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-[18px] top-1/2 size-[18px] -translate-y-1/2 text-[#747474]" />
+      </span>
+    </label>
+  ) : null;
 
   const selectedStage = selectedStep ? journeyStages[selectedStep.stageIdx] : null;
   const selectedPlatform = selectedStage?.platforms[0] || null;
@@ -446,11 +504,13 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
               <img alt="ASU Logo" className="absolute h-[148%] left-[-14%] top-[-24%] w-[127%] max-w-none" src={imgLogo} />
             </div>
             {!isMobileLayout && (
-              <p className="leading-none text-[#191919] text-[24px] tracking-[-0.84px] whitespace-nowrap" style={{ fontWeight: 'bold' }}>
+              <p className="leading-none text-[#191919] text-[24px] tracking-[-0.84px] whitespace-nowrap truncate" style={{ fontWeight: 'bold' }}>
                 {activeMap.brand.title}
               </p>
             )}
           </div>
+          <div className="flex items-center gap-[20px] shrink-0">
+          {showPersonaPicker && !isMobileLayout && personaPicker}
           {/* State Toggle */}
           {availableStates.length > 1 ? (
           <div
@@ -521,7 +581,11 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
               {availableStates[0] === 'current' ? stateLabels.current : stateLabels.future}
             </div>
           )}
+          </div>
         </div>
+        {showPersonaPicker && isMobileLayout && (
+          <div className="border-t border-[#e8e8e8] px-[12px] py-[12px]">{personaPicker}</div>
+        )}
       </div>
 
       {/* Map + Summary */}
@@ -617,6 +681,7 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
           {/* ── Current state: Pain point markers ── */}
           {currentPositions.map((pos, i) => {
             const marker = currentStateMarkers[i];
+            if (!marker) return null;
             const { x: pixelX, y: pixelY } = getMarkerPosition(pos, i, 'current');
             const side = getCurrentMobileSide(marker, i, marker.side);
             const labelStyle = getLabelStyle(pixelX, pixelY, side);
@@ -706,13 +771,14 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
           {/* ── Future state: Step dots + labels ── */}
           {futurePositions.map((pos, i) => {
             const marker = futureStateMarkers[i];
+            if (!marker) return null;
             const lines = marker.label.split('\n');
             const isHovered = hoveredDot === i;
             const isCirclePressed = pressedDotCircle === i;
             const isLabelPressed = pressedDotLabel === i;
             const { x: pixelX, y: pixelY } = getMarkerPosition(pos, i, 'future');
             const guidedTourDotIndex = isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex;
-            const isGuidedTourDot = i === guidedTourDotIndex;
+            const isGuidedTourDot = !activePersona && i === guidedTourDotIndex;
             const showActiveFutureStyle = isMobileLayout || isHovered;
 
             const mobileLabelConfig = getFutureMobileLabelConfig(marker, i, marker.side);
@@ -728,7 +794,7 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
 
             return (
               <div
-                key={`future-${i}`}
+                key={`future-${activePersona?.id ?? 'default'}-${i}`}
                 style={{
                   opacity: journeyState === 'future' && features.futureStateEnabled ? (markersVisible ? 1 : 0) : 0,
                   transition: 'opacity 0.25s ease',
@@ -890,7 +956,7 @@ export function JourneyMap({ projectOverride, exportMode = false }: JourneyMapPr
           })}
 
           {/* Guided Tour Popover — only in Future state, anchored to the guided-tour dot */}
-          {features.guidedTourEnabled && activeMap.guidedTour.enabled && futurePositions.length > 0 && journeyState === 'future' && (
+          {features.guidedTourEnabled && activeMap.guidedTour.enabled && !activePersona && futurePositions.length > (isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex) && journeyState === 'future' && (
             <GuidedTourPopover
               visible={showPopover}
               onDismiss={() => setShowPopover(false)}

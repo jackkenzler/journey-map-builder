@@ -1,26 +1,27 @@
-import { useOrganization } from '@clerk/clerk-react';
 import { toPng } from 'html-to-image';
-import { Download, House, Upload } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Copy, Download, House, Plus, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { asuNondegreeProject } from '../../../builder';
+import { uploadMapImage } from '../../../builder/images';
 import {
-  clearDraftProject,
+  getJourneyMapProject,
+  getJourneyMapProjectBySlug,
+  publishJourneyMapProject,
   saveDraftProject,
-  savePublishedJourneyMap,
-} from '../../../builder/draftStorage';
-import { getJourneyMapProject } from '../../../builder/repository';
+} from '../../../builder/repository';
 import { hasSupabaseConfig } from '../../../builder/supabase';
-import type {
-  CurrentStateMarkerConfig,
-  FutureStateMarkerConfig,
-  JourneyMapConfig,
-  JourneyMapProject,
-  JourneyMarkerConfig,
-  JourneyMarkerLabelConfig,
-  JourneyStageConfig,
-  JourneyStageSummaryConfig,
-  LabelSide,
+import {
+  MAX_FUTURE_PERSONAS,
+  type CurrentStateMarkerConfig,
+  type FuturePersonaConfig,
+  type FutureStateMarkerConfig,
+  type JourneyMapConfig,
+  type JourneyMapProject,
+  type JourneyMarkerConfig,
+  type JourneyMarkerLabelConfig,
+  type JourneyStageConfig,
+  type JourneyStageSummaryConfig,
+  type LabelSide,
 } from '../../../builder/types';
 import { JourneyMap } from '../JourneyMap';
 import { Switch } from '../ui/switch';
@@ -166,39 +167,33 @@ function nextPct(lastPct: number | undefined, fallback: number) {
   return Number(Math.min(0.95, (lastPct ?? fallback) + 0.04).toFixed(4));
 }
 
-function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(reader.error ?? new Error('Unable to read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
 function UploadField({
   label,
   onChange,
   disabled,
   hasValue,
+  uploading,
 }: {
   label: string;
   onChange: (file: File | null) => void | Promise<void>;
   disabled?: boolean;
   hasValue: boolean;
+  uploading?: boolean;
 }) {
+  const blocked = disabled || uploading;
   return (
     <label className="grid gap-[8px]">
       <FieldLabel>{label}</FieldLabel>
       <div className="flex items-center gap-[12px] rounded-[12px] border border-black/10 bg-white px-[12px] py-[10px]">
         <span
-          className={`inline-flex items-center gap-[8px] rounded-full px-[14px] py-[9px] text-[14px] text-white ${interactiveButtonClassName} ${disabled ? 'cursor-not-allowed bg-[#B7B7B7]' : 'bg-[#8C1D40] hover:bg-[#7a1938]'}`}
+          className={`inline-flex items-center gap-[8px] rounded-full px-[14px] py-[9px] text-[14px] text-white ${interactiveButtonClassName} ${blocked ? 'cursor-not-allowed bg-[#B7B7B7]' : 'bg-[#8C1D40] hover:bg-[#7a1938]'}`}
           style={{ fontWeight: 'bold' }}
         >
           <Upload className="size-[16px]" />
-          Upload photo
+          {uploading ? 'Uploading...' : 'Upload photo'}
         </span>
         <span className="text-[14px] text-[#5f5f5f]">
-          {hasValue ? 'Image uploaded' : 'PNG, JPG, or WebP'}
+          {hasValue ? 'Image hosted and ready' : 'PNG, JPG, or WebP, up to 10 MB'}
         </span>
         <input
           type="file"
@@ -209,7 +204,7 @@ function UploadField({
             event.target.value = '';
           }}
           className="hidden"
-          disabled={disabled}
+          disabled={blocked}
         />
       </div>
     </label>
@@ -431,24 +426,462 @@ function LabelTuningEditor({
   );
 }
 
+function FutureStepsEditor({
+  title,
+  description,
+  markers,
+  onMarkersChange,
+  stages,
+  comparisonModalEnabled,
+}: {
+  title: string;
+  description: string;
+  markers: FutureStateMarkerConfig[];
+  onMarkersChange: (updater: (current: FutureStateMarkerConfig[]) => FutureStateMarkerConfig[]) => void;
+  stages: JourneyStageConfig[];
+  comparisonModalEnabled: boolean;
+}) {
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const updateMarker = (
+    index: number,
+    updater: (marker: FutureStateMarkerConfig) => FutureStateMarkerConfig,
+  ) => {
+    onMarkersChange((current) => current.map((marker, markerIndex) => (markerIndex === index ? updater(marker) : marker)));
+  };
+
+  const updateLabelConfig = (
+    index: number,
+    key: LabelConfigKey,
+    updater: (config: JourneyMarkerLabelConfig | undefined) => JourneyMarkerLabelConfig,
+  ) => {
+    updateMarker(index, (marker) => ({ ...marker, [key]: updater(marker[key]) }));
+  };
+
+  const addStep = () => {
+    onMarkersChange((current) => {
+      const lastMarker = current[current.length - 1];
+      return distributeMarkerPlacements(
+        [
+          ...current,
+          {
+            id: `future-step-${Date.now().toString(36)}`,
+            label: 'New step',
+            modalTitle: 'New step',
+            labelVariant: 'interactive-card',
+            stageId: stages[0]?.id ?? '',
+            desktop: { pct: nextPct(lastMarker?.desktop.pct, 0.2), side: 'below' },
+            mobile: { pct: nextPct(lastMarker?.mobile.pct, 0.2), side: 'right' },
+            beforeImage: '',
+            afterImage: '',
+          },
+        ],
+        'future',
+      );
+    });
+  };
+
+  const removeStep = (index: number) => {
+    onMarkersChange((current) =>
+      distributeMarkerPlacements(current.filter((_, markerIndex) => markerIndex !== index), 'future'),
+    );
+  };
+
+  const uploadImage = async (index: number, field: 'beforeImage' | 'afterImage', file: File | null) => {
+    if (!file) return;
+    const key = `${index}-${field}`;
+    setUploadingKey(key);
+    setUploadError(null);
+    try {
+      const url = await uploadMapImage(file, file.name);
+      updateMarker(index, (currentMarker) => ({ ...currentMarker, [field]: url }));
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Image upload failed.');
+    } finally {
+      setUploadingKey(null);
+    }
+  };
+
+  return (
+    <SectionCard
+      title={title}
+      description={description}
+      actions={
+        <div className="flex flex-wrap gap-[10px]">
+          <button
+            onClick={() => onMarkersChange((current) => distributeMarkerPlacements(current, 'future'))}
+            className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
+            style={{ fontWeight: 'bold' }}
+          >
+            Auto arrange
+          </button>
+          <button
+            onClick={addStep}
+            className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
+            style={{ fontWeight: 'bold' }}
+          >
+            Add step
+          </button>
+        </div>
+      }
+    >
+      {uploadError ? (
+        <p className="mb-[12px] rounded-[12px] border border-[#E4B4B4] bg-[#FFF4F4] px-[14px] py-[10px] text-[14px] text-[#8A1F1F]">
+          {uploadError}
+        </p>
+      ) : null}
+      <div className="grid gap-[12px]">
+        {markers.map((marker, index) => {
+          const desktopSideOverride = Boolean(marker.desktopLabel?.side);
+          const mobileSideOverride = Boolean(marker.mobileLabel?.side);
+
+          return (
+            <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]">
+              <summary
+                className="cursor-pointer rounded-[8px] text-[18px] text-[#191919] transition-colors hover:bg-black/5 active:bg-black/10"
+                style={{ fontWeight: 'bold' }}
+              >
+                Step {index + 1}
+              </summary>
+
+              <div className="mt-[14px] grid gap-[12px]">
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => removeStep(index)}
+                    className={`rounded-full border border-black/10 bg-[#FAFAFA] px-[14px] py-[8px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
+                    style={{ fontWeight: 'bold' }}
+                  >
+                    Remove step
+                  </button>
+                </div>
+
+                <label className="grid gap-[8px]">
+                  <FieldLabel>Step label</FieldLabel>
+                  <textarea
+                    value={marker.label}
+                    onChange={(event) =>
+                      updateMarker(index, (currentMarker) => ({
+                        ...currentMarker,
+                        label: event.target.value,
+                      }))
+                    }
+                    rows={3}
+                    className={mutedInputClassName}
+                  />
+                </label>
+
+                <div className="grid gap-[12px] md:grid-cols-2">
+                  <label className="grid gap-[8px]">
+                    <FieldLabel>Step type</FieldLabel>
+                    <select
+                      value={getStepType(marker)}
+                      onChange={(event) =>
+                        updateMarker(index, (currentMarker) =>
+                          applyStepType(currentMarker, event.target.value as StepType),
+                        )
+                      }
+                      className={mutedInputClassName}
+                    >
+                      {stepTypeOptions.map((option) => (
+                        <option
+                          key={option.value}
+                          value={option.value}
+                          disabled={!comparisonModalEnabled && option.value === 'interactive-card'}
+                        >
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-[8px]">
+                    <FieldLabel>Stage</FieldLabel>
+                    <select
+                      value={marker.stageId}
+                      onChange={(event) =>
+                        updateMarker(index, (currentMarker) => ({
+                          ...currentMarker,
+                          stageId: event.target.value,
+                        }))
+                      }
+                      className={mutedInputClassName}
+                    >
+                      {stages.map((stage) => (
+                        <option key={stage.id} value={stage.id}>
+                          {stage.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid gap-[12px] md:grid-cols-2">
+                  <label className="grid gap-[8px]">
+                    <FieldLabel>Modal title</FieldLabel>
+                    <input
+                      value={marker.modalTitle ?? ''}
+                      onChange={(event) =>
+                        updateMarker(index, (currentMarker) => ({
+                          ...currentMarker,
+                          modalTitle: event.target.value || undefined,
+                        }))
+                      }
+                      className={mutedInputClassName}
+                    />
+                  </label>
+                  <label className="grid gap-[8px]">
+                    <FieldLabel>Step ID</FieldLabel>
+                    <input
+                      value={marker.id}
+                      onChange={(event) =>
+                        updateMarker(index, (currentMarker) => ({
+                          ...currentMarker,
+                          id: slugify(event.target.value) || currentMarker.id,
+                        }))
+                      }
+                      className={mutedInputClassName}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-[12px] md:grid-cols-2">
+                  <label className="grid gap-[8px]">
+                    <FieldLabel>Before image URL</FieldLabel>
+                    <input
+                      value={marker.beforeImage ?? ''}
+                      onChange={(event) =>
+                        updateMarker(index, (currentMarker) => ({
+                          ...currentMarker,
+                          beforeImage: event.target.value || undefined,
+                        }))
+                      }
+                      className={mutedInputClassName}
+                      disabled={!comparisonModalEnabled}
+                      placeholder={comparisonModalEnabled ? 'Paste an image URL or upload below' : 'Enable comparison modal first'}
+                    />
+                  </label>
+                  <label className="grid gap-[8px]">
+                    <FieldLabel>After image URL</FieldLabel>
+                    <input
+                      value={marker.afterImage ?? ''}
+                      onChange={(event) =>
+                        updateMarker(index, (currentMarker) => ({
+                          ...currentMarker,
+                          afterImage: event.target.value || undefined,
+                        }))
+                      }
+                      className={mutedInputClassName}
+                      disabled={!comparisonModalEnabled}
+                      placeholder={comparisonModalEnabled ? 'Paste an image URL or upload below' : 'Enable comparison modal first'}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-[12px] md:grid-cols-2">
+                  <UploadField
+                    label="Upload before image"
+                    hasValue={Boolean(marker.beforeImage)}
+                uploading={uploadingKey === `${index}-beforeImage`}
+                    disabled={!comparisonModalEnabled}
+                    onChange={(file) => uploadImage(index, 'beforeImage', file)}
+                  />
+                  <UploadField
+                    label="Upload after image"
+                    hasValue={Boolean(marker.afterImage)}
+                uploading={uploadingKey === `${index}-afterImage`}
+                    disabled={!comparisonModalEnabled}
+                    onChange={(file) => uploadImage(index, 'afterImage', file)}
+                  />
+                </div>
+
+                <div className="grid gap-[12px] md:grid-cols-2">
+                  <div className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[12px] py-[10px] text-[14px] text-[#5f5f5f]">
+                    {marker.beforeImage
+                      ? 'Before image configured'
+                      : 'Before image will use a placeholder until one is uploaded'}
+                  </div>
+                  <div className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[12px] py-[10px] text-[14px] text-[#5f5f5f]">
+                    {marker.afterImage
+                      ? 'After image configured'
+                      : 'After image will use a placeholder until one is uploaded'}
+                  </div>
+                </div>
+
+                <div className="grid gap-[12px] xl:grid-cols-2">
+                  <PlacementEditor
+                    label="Desktop placement"
+                    pct={marker.desktop.pct}
+                    side={marker.desktop.side}
+                    onPctChange={(value) =>
+                      updateMarker(index, (currentMarker) => ({
+                        ...currentMarker,
+                        desktop: {
+                          ...currentMarker.desktop,
+                          pct: Number(value) || currentMarker.desktop.pct,
+                        },
+                      }))
+                    }
+                    onSideChange={(value) =>
+                      updateMarker(index, (currentMarker) => ({
+                        ...currentMarker,
+                        desktop: { ...currentMarker.desktop, side: value },
+                      }))
+                    }
+                  />
+                  <PlacementEditor
+                    label="Mobile placement"
+                    pct={marker.mobile.pct}
+                    side={marker.mobile.side}
+                    onPctChange={(value) =>
+                      updateMarker(index, (currentMarker) => ({
+                        ...currentMarker,
+                        mobile: {
+                          ...currentMarker.mobile,
+                          pct: Number(value) || currentMarker.mobile.pct,
+                        },
+                      }))
+                    }
+                    onSideChange={(value) =>
+                      updateMarker(index, (currentMarker) => ({
+                        ...currentMarker,
+                        mobile: { ...currentMarker.mobile, side: value },
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="grid gap-[12px] xl:grid-cols-2">
+                  <LabelTuningEditor
+                    label="Desktop label tuning"
+                    fallbackSide={marker.desktop.side}
+                    config={marker.desktopLabel}
+                    onToggleSideOverride={(enabled) =>
+                      updateLabelConfig(index, 'desktopLabel', (config) =>
+                        buildLabelConfigWithOptionalSide(config, enabled, marker.desktop.side),
+                      )
+                    }
+                    onSideOverrideChange={(side) =>
+                      updateLabelConfig(index, 'desktopLabel', (config) => ({
+                        ...(config ?? {}),
+                        side,
+                      }))
+                    }
+                    onFieldChange={(field, value) =>
+                      updateLabelConfig(index, 'desktopLabel', (config) =>
+                        buildLabelConfigPatch(
+                          desktopSideOverride || field !== 'side'
+                            ? config
+                            : { ...(config ?? {}), side: marker.desktop.side },
+                          field,
+                          value,
+                        ),
+                      )
+                    }
+                    onReset={() =>
+                      updateMarker(index, (currentMarker) => ({
+                        ...currentMarker,
+                        desktopLabel: undefined,
+                      }))
+                    }
+                  />
+
+                  <LabelTuningEditor
+                    label="Mobile label tuning"
+                    fallbackSide={marker.mobile.side}
+                    config={marker.mobileLabel}
+                    onToggleSideOverride={(enabled) =>
+                      updateLabelConfig(index, 'mobileLabel', (config) =>
+                        buildLabelConfigWithOptionalSide(config, enabled, marker.mobile.side),
+                      )
+                    }
+                    onSideOverrideChange={(side) =>
+                      updateLabelConfig(index, 'mobileLabel', (config) => ({
+                        ...(config ?? {}),
+                        side,
+                      }))
+                    }
+                    onFieldChange={(field, value) =>
+                      updateLabelConfig(index, 'mobileLabel', (config) =>
+                        buildLabelConfigPatch(
+                          mobileSideOverride || field !== 'side'
+                            ? config
+                            : { ...(config ?? {}), side: marker.mobile.side },
+                          field,
+                          value,
+                        ),
+                      )
+                    }
+                    onReset={() =>
+                      updateMarker(index, (currentMarker) => ({
+                        ...currentMarker,
+                        mobileLabel: undefined,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </SectionCard>
+  );
+}
+
 export function BuilderMapView() {
-  const { orgSlug = '', mapSlug = '' } = useParams();
-  const { organization } = useOrganization();
+  const { orgSlug, mapSlug = '' } = useParams();
   const [project, setProject] = useState<JourneyMapProject | null | undefined>(undefined);
   const [draftMap, setDraftMap] = useState<JourneyMapConfig | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isExportingPng, setIsExportingPng] = useState(false);
   const [activeStepsTab, setActiveStepsTab] = useState<StateKey>('current');
+  const [editingPersonaId, setEditingPersonaId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState('');
   const exportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getJourneyMapProject(orgSlug, mapSlug).then(setProject);
+    let cancelled = false;
+    setProject(undefined);
+    setLoadError(null);
+
+    const load = orgSlug ? getJourneyMapProject(orgSlug, mapSlug) : getJourneyMapProjectBySlug(mapSlug);
+    load
+      .then((result) => {
+        if (!cancelled) setProject(result);
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        setLoadError(error.message);
+        setProject(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [orgSlug, mapSlug]);
 
   useEffect(() => {
     if (!project) return;
     setDraftMap(project.map);
+    setSavedSnapshot(JSON.stringify(project.map));
+    setEditingPersonaId(null);
   }, [project]);
+
+  const hasUnsavedChanges = useMemo(
+    () => Boolean(draftMap) && JSON.stringify(draftMap) !== savedSnapshot,
+    [draftMap, savedSnapshot],
+  );
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasUnsavedChanges]);
 
   useEffect(() => {
     if (!draftMap) return;
@@ -484,29 +917,13 @@ export function BuilderMapView() {
     }));
   };
 
-  const updateFutureMarker = (
-    index: number,
-    updater: (marker: FutureStateMarkerConfig) => FutureStateMarkerConfig,
-  ) => {
-    updateDraftMap((current) => ({
-      ...current,
-      futureStateMarkers: current.futureStateMarkers.map((marker, markerIndex) =>
-        markerIndex === index ? updater(marker) : marker,
-      ),
-    }));
-  };
-
   const updateLabelConfig = (
-    state: StateKey,
+    _state: 'current',
     index: number,
     key: LabelConfigKey,
     updater: (config: JourneyMarkerLabelConfig | undefined) => JourneyMarkerLabelConfig,
   ) => {
-    if (state === 'current') {
-      updateCurrentMarker(index, (marker) => ({ ...marker, [key]: updater(marker[key]) }));
-      return;
-    }
-    updateFutureMarker(index, (marker) => ({ ...marker, [key]: updater(marker[key]) }));
+    updateCurrentMarker(index, (marker) => ({ ...marker, [key]: updater(marker[key]) }));
   };
 
   const updateStage = (index: number, updater: (stage: JourneyStageConfig) => JourneyStageConfig) => {
@@ -586,6 +1003,12 @@ export function BuilderMapView() {
         futureStateMarkers: current.futureStateMarkers.map((marker) =>
           marker.stageId === removedStage.id ? { ...marker, stageId: fallbackStageId } : marker,
         ),
+        futurePersonas: (current.futurePersonas ?? []).map((persona) => ({
+          ...persona,
+          markers: persona.markers.map((marker) =>
+            marker.stageId === removedStage.id ? { ...marker, stageId: fallbackStageId } : marker,
+          ),
+        })),
       };
     });
   };
@@ -623,32 +1046,6 @@ export function BuilderMapView() {
     }));
   };
 
-  const addFutureStep = () => {
-    updateDraftMap((current) => {
-      const lastMarker = current.futureStateMarkers[current.futureStateMarkers.length - 1];
-      return {
-        ...current,
-        futureStateMarkers: distributeMarkerPlacements(
-          [
-            ...current.futureStateMarkers,
-            {
-              id: `future-step-${Date.now().toString(36)}`,
-              label: 'New step',
-              modalTitle: 'New step',
-              labelVariant: 'interactive-card',
-              stageId: current.stages[0]?.id ?? '',
-              desktop: { pct: nextPct(lastMarker?.desktop.pct, 0.2), side: 'below' },
-              mobile: { pct: nextPct(lastMarker?.mobile.pct, 0.2), side: 'right' },
-              beforeImage: '',
-              afterImage: '',
-            },
-          ],
-          'future',
-        ),
-      };
-    });
-  };
-
   const removeCurrentStep = (index: number) => {
     updateDraftMap((current) => ({
       ...current,
@@ -659,41 +1056,52 @@ export function BuilderMapView() {
     }));
   };
 
-  const removeFutureStep = (index: number) => {
+  const autoArrangeCurrentState = () => {
     updateDraftMap((current) => ({
       ...current,
-      futureStateMarkers: distributeMarkerPlacements(
-        current.futureStateMarkers.filter((_, markerIndex) => markerIndex !== index),
-        'future',
+      currentStateMarkers: distributeMarkerPlacements(current.currentStateMarkers, 'current'),
+    }));
+  };
+
+  const personas = draftMap?.futurePersonas ?? [];
+  const editingPersona = personas.find((persona) => persona.id === editingPersonaId) ?? null;
+
+  const updatePersona = (personaId: string, updater: (persona: FuturePersonaConfig) => FuturePersonaConfig) => {
+    updateDraftMap((current) => ({
+      ...current,
+      futurePersonas: (current.futurePersonas ?? []).map((persona) =>
+        persona.id === personaId ? updater(persona) : persona,
       ),
     }));
   };
 
-  const autoArrangeState = (state: StateKey) => {
+  const addPersona = () => {
+    const existing = draftMap?.futurePersonas ?? [];
+    if (existing.length >= MAX_FUTURE_PERSONAS) return;
+
+    const persona: FuturePersonaConfig = {
+      id: `persona-${Date.now().toString(36)}`,
+      name: `Persona ${existing.length + 1}`,
+      // Start from the main future steps so there is something to edit; it can be changed freely.
+      markers: JSON.parse(JSON.stringify(draftMap?.futureStateMarkers ?? [])) as FutureStateMarkerConfig[],
+    };
     updateDraftMap((current) => ({
       ...current,
-      currentStateMarkers:
-        state === 'current'
-          ? distributeMarkerPlacements(current.currentStateMarkers, 'current')
-          : current.currentStateMarkers,
-      futureStateMarkers:
-        state === 'future'
-          ? distributeMarkerPlacements(current.futureStateMarkers, 'future')
-          : current.futureStateMarkers,
+      futurePersonas: [...(current.futurePersonas ?? []), persona].slice(0, MAX_FUTURE_PERSONAS),
     }));
+    setEditingPersonaId(persona.id);
   };
 
-  const handleFutureImageUpload = async (
-    index: number,
-    field: 'beforeImage' | 'afterImage',
-    file: File | null,
-  ) => {
-    if (!file) return;
-    const dataUrl = await fileToDataUrl(file);
-    updateFutureMarker(index, (currentMarker) => ({
-      ...currentMarker,
-      [field]: dataUrl,
+  const removePersona = (personaId: string) => {
+    const persona = personas.find((item) => item.id === personaId);
+    if (!persona) return;
+    if (!window.confirm(`Delete "${persona.name.trim() || 'this persona'}" and all of its steps?`)) return;
+
+    updateDraftMap((current) => ({
+      ...current,
+      futurePersonas: (current.futurePersonas ?? []).filter((item) => item.id !== personaId),
     }));
+    setEditingPersonaId(null);
   };
 
   if (project === undefined) {
@@ -714,7 +1122,7 @@ export function BuilderMapView() {
             Map not found
           </p>
           <p className="mb-[16px] text-[16px] leading-[1.5] text-[#5f5f5f]">
-            This builder route does not have a matching project configuration yet.
+            {loadError ?? 'This builder route does not have a matching project configuration yet.'}
           </p>
           <Link
             to="/app"
@@ -731,6 +1139,7 @@ export function BuilderMapView() {
   if (!draftMap) return null;
 
   const stateLabels = draftMap.stateLabels ?? { current: 'State 1', future: 'State 2' };
+  const defaultPersonaName = draftMap.futureDefaultPersonaName?.trim() || 'Default';
   const features = {
     summaryPanelEnabled: true,
     ...draftMap.features,
@@ -740,43 +1149,59 @@ export function BuilderMapView() {
     features.futureStateEnabled ? 'future' : null,
   ].filter(Boolean) as StateKey[]);
   const publishing = draftMap.publishing ?? { siteSlug: draftMap.slug };
-  const previewHref = `/preview/${project.organization.slug}/${draftMap.slug}`;
-  const publishedHref = `/published/${project.organization.slug}/${publishing.siteSlug}`;
+  const previewHref = `/preview/${draftMap.slug}`;
+  const publishedHref = `/published/${publishing.siteSlug}`;
   const previewProject: JourneyMapProject = {
-    organization: project.organization,
     map: {
       ...draftMap,
       publishing,
     },
   };
 
-  const handleSaveDraft = () => {
-    saveDraftProject(previewProject);
-    setSaveMessage('Draft saved locally. Open preview map to review the latest version.');
+  const publishedUrl = `${window.location.origin}${publishedHref}`;
+
+  const handleSaveDraft = async () => {
+    setIsSaving(true);
+    try {
+      await saveDraftProject(previewProject);
+      setSavedSnapshot(JSON.stringify(draftMap));
+      setSaveMessage('Draft saved to your account. You can open it from any device.');
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : 'Save failed. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleResetDraft = () => {
-    clearDraftProject(project.organization.slug, project.map.slug);
+    if (hasUnsavedChanges && !window.confirm('Discard your unsaved changes and go back to the last saved draft?')) return;
     setDraftMap(project.map);
-    setSaveMessage('Local draft cleared. Reverted to the last loaded version.');
+    setSavedSnapshot(JSON.stringify(project.map));
+    setEditingPersonaId(null);
+    setSaveMessage('Unsaved changes discarded.');
   };
 
-  const handlePublish = () => {
-    const snapshot = savePublishedJourneyMap(previewProject, publishing.siteSlug);
-    saveDraftProject(previewProject);
-    setDraftMap((current) =>
-      current
-        ? {
-            ...current,
-            publishing: {
-              ...current.publishing,
-              siteSlug: snapshot.siteSlug,
-              lastPublishedAt: snapshot.publishedAt,
-            },
-          }
-        : current,
-    );
-    setSaveMessage(`Published to /published/${snapshot.orgSlug}/${snapshot.siteSlug}`);
+  const handlePublish = async () => {
+    setIsSaving(true);
+    try {
+      const result = await publishJourneyMapProject(previewProject);
+      setDraftMap(result.project.map);
+      setSavedSnapshot(JSON.stringify(result.project.map));
+      setSaveMessage(`Published. Anyone with the link can view it: ${window.location.origin}/published/${result.siteSlug}`);
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : 'Publish failed. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publishedUrl);
+      setSaveMessage('Published link copied.');
+    } catch {
+      setSaveMessage(`Copy this link: ${publishedUrl}`);
+    }
   };
 
   const handleDownloadPng = async () => {
@@ -805,7 +1230,7 @@ export function BuilderMapView() {
       <div className="mx-auto max-w-[1200px] px-[24px] py-[32px] md:px-[40px] md:py-[48px]">
         <div className="mb-[24px] flex flex-col gap-[8px]">
           <p className="text-[14px] text-[#767676]">
-            {project.organization.name} / {draftMap.slug}
+            Map key: {draftMap.slug}
           </p>
           <div className="flex flex-wrap items-center gap-[16px]">
             <h1 className="text-[34px] leading-[1.05] tracking-[-1.2px] text-[#191919]" style={{ fontWeight: 'bold' }}>
@@ -835,28 +1260,54 @@ export function BuilderMapView() {
 
         <div className="mb-[24px] grid gap-[16px] md:grid-cols-3">
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
-            <p className="mb-[8px] text-[14px] text-[#767676]">Active organization</p>
+            <p className="mb-[8px] text-[14px] text-[#767676]">Map status</p>
             <p className="text-[20px] text-[#191919]" style={{ fontWeight: 'bold' }}>
-              {organization?.name ?? project.organization.name}
+              {draftMap.publishing.lastPublishedAt ? 'Published and editable' : 'Draft in progress'}
+            </p>
+            <p className="mt-[6px] text-[14px] leading-[1.5] text-[#767676]">
+              {draftMap.publishing.lastPublishedAt
+                ? 'Changes stay in draft until you publish again.'
+                : 'This map is only visible in the builder until you publish it.'}
             </p>
           </div>
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
-            <p className="mb-[8px] text-[14px] text-[#767676]">Data source</p>
+            <p className="mb-[8px] text-[14px] text-[#767676]">Draft storage</p>
             <p className="text-[20px] text-[#191919]" style={{ fontWeight: 'bold' }}>
-              {hasSupabaseConfig ? 'Supabase + local drafts' : 'Local draft registry'}
+              {!hasSupabaseConfig ? 'Cloud not configured' : hasUnsavedChanges ? 'Unsaved changes' : 'Saved to your account'}
+            </p>
+            <p className="mt-[6px] text-[14px] leading-[1.5] text-[#767676]">
+              {hasSupabaseConfig
+                ? 'Drafts and uploaded images are stored online, so they follow you to any device.'
+                : 'Add the Supabase environment variables to save drafts and host images.'}
             </p>
           </div>
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
-            <p className="mb-[8px] text-[14px] text-[#767676]">Published URL</p>
-            <Link
-              to={publishedHref}
-              target="_blank"
-              rel="noreferrer"
-              className={`text-[16px] break-all text-[#8C1D40] underline underline-offset-4 ${interactiveLinkClassName}`}
-              style={{ fontWeight: 'bold' }}
-            >
-              {publishedHref}
-            </Link>
+            <p className="mb-[8px] text-[14px] text-[#767676]">Public link</p>
+            <div className="flex items-start gap-[10px]">
+              <Link
+                to={publishedHref}
+                target="_blank"
+                rel="noreferrer"
+                className={`text-[16px] break-all text-[#8C1D40] underline underline-offset-4 ${interactiveLinkClassName}`}
+                style={{ fontWeight: 'bold' }}
+              >
+                {publishedHref}
+              </Link>
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                aria-label="Copy public link"
+                title="Copy public link"
+                className={`inline-flex size-[32px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-[#FAFAFA] text-[#191919] ${interactiveButtonClassName}`}
+              >
+                <Copy className="size-[14px]" />
+              </button>
+            </div>
+            <p className="mt-[6px] text-[14px] leading-[1.5] text-[#767676]">
+              {draftMap.publishing.lastPublishedAt
+                ? 'Anyone with this link can view the published map.'
+                : 'Works for anyone once you publish.'}
+            </p>
           </div>
         </div>
 
@@ -880,14 +1331,15 @@ export function BuilderMapView() {
               className={`rounded-full border border-black/10 bg-[#FAFAFA] px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
               style={{ fontWeight: 'bold' }}
             >
-              Reset draft
+              Discard changes
             </button>
             <button
               onClick={handlePublish}
-              className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
+              disabled={isSaving}
+              className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName} disabled:cursor-wait disabled:opacity-60`}
               style={{ fontWeight: 'bold' }}
             >
-              Publish map
+              {isSaving ? 'Working...' : 'Publish map'}
             </button>
             <button
               onClick={handleDownloadPng}
@@ -899,10 +1351,11 @@ export function BuilderMapView() {
             </button>
             <button
               onClick={handleSaveDraft}
-              className={`rounded-full bg-[#8C1D40] px-[16px] py-[10px] text-[14px] text-white ${interactiveButtonClassName}`}
+              disabled={isSaving}
+              className={`rounded-full bg-[#8C1D40] px-[16px] py-[10px] text-[14px] text-white ${interactiveButtonClassName} disabled:cursor-wait disabled:opacity-60`}
               style={{ fontWeight: 'bold' }}
             >
-              Save draft
+              {isSaving ? 'Saving...' : 'Save draft'}
             </button>
           </div>
         </div>
@@ -1052,6 +1505,7 @@ export function BuilderMapView() {
                     {[
                       ['currentStateEnabled', 'Show current state'],
                       ['futureStateEnabled', 'Show future state'],
+                      ['futurePersonasEnabled', 'Show persona dropdown on future state'],
                       ['summaryPanelEnabled', 'Show summary panel'],
                       ['guidedTourEnabled', 'Show guided tour'],
                       ['comparisonModalEnabled', 'Show comparison modal'],
@@ -1062,7 +1516,7 @@ export function BuilderMapView() {
                       >
                         <span className="text-[16px] text-[#191919]">{label}</span>
                         <Switch
-                          checked={features[key as keyof typeof features]}
+                          checked={Boolean(features[key as keyof typeof features])}
                           onCheckedChange={(checked) =>
                             updateDraftMap((current) => ({
                               ...current,
@@ -1079,6 +1533,13 @@ export function BuilderMapView() {
                                 key === 'comparisonModalEnabled' && !checked
                                   ? removeInteractiveCards(current.futureStateMarkers)
                                   : current.futureStateMarkers,
+                              futurePersonas:
+                                key === 'comparisonModalEnabled' && !checked
+                                  ? (current.futurePersonas ?? []).map((persona) => ({
+                                      ...persona,
+                                      markers: removeInteractiveCards(persona.markers),
+                                    }))
+                                  : current.futurePersonas,
                             }))
                           }
                         />
@@ -1416,7 +1877,7 @@ export function BuilderMapView() {
                   actions={
                     <div className="flex flex-wrap gap-[10px]">
                       <button
-                        onClick={() => autoArrangeState('current')}
+                        onClick={autoArrangeCurrentState}
                         className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
                         style={{ fontWeight: 'bold' }}
                       >
@@ -1648,320 +2109,162 @@ export function BuilderMapView() {
 
               {features.futureStateEnabled ? (
               <TabsContent value="future">
-                <SectionCard
-                  title={`${stateLabels.future} steps`}
-                  description="Future steps support stage assignment, before and after images, and the same shared step types."
-                  actions={
-                    <div className="flex flex-wrap gap-[10px]">
-                      <button
-                        onClick={() => autoArrangeState('future')}
-                        className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
-                        style={{ fontWeight: 'bold' }}
-                      >
-                        Auto arrange
-                      </button>
-                      <button
-                        onClick={addFutureStep}
-                        className={`rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
-                        style={{ fontWeight: 'bold' }}
-                      >
-                        Add step
-                      </button>
-                    </div>
-                  }
-                >
-                  <div className="grid gap-[12px]">
-                    {draftMap.futureStateMarkers.map((marker, index) => {
-                      const desktopSideOverride = Boolean(marker.desktopLabel?.side);
-                      const mobileSideOverride = Boolean(marker.mobileLabel?.side);
+                <div className="grid gap-[16px]">
+                  <SectionCard
+                    title="Personas"
+                    description={`Show a persona dropdown on the ${stateLabels.future.toLowerCase()} so each persona can have its own version of the steps, images, and summaries. Add up to ${MAX_FUTURE_PERSONAS}.`}
+                  >
+                    <div className="grid gap-[14px]">
+                      <label className="flex items-center justify-between rounded-[12px] border border-black/10 bg-white px-[14px] py-[12px]">
+                        <span className="text-[16px] text-[#191919]">Show persona dropdown</span>
+                        <Switch
+                          checked={Boolean(features.futurePersonasEnabled)}
+                          onCheckedChange={(checked) =>
+                            updateDraftMap((current) => ({
+                              ...current,
+                              features: { ...current.features, futurePersonasEnabled: checked },
+                            }))
+                          }
+                        />
+                      </label>
 
-                      return (
-                        <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]">
-                          <summary
-                            className="cursor-pointer rounded-[8px] text-[18px] text-[#191919] transition-colors hover:bg-black/5 active:bg-black/10"
-                            style={{ fontWeight: 'bold' }}
-                          >
-                            Step {index + 1}
-                          </summary>
-
-                          <div className="mt-[14px] grid gap-[12px]">
-                            <div className="flex justify-end">
+                      {features.futurePersonasEnabled ? (
+                        <>
+                          <div className="flex flex-wrap items-center gap-[8px]">
+                            <button
+                              type="button"
+                              onClick={() => setEditingPersonaId(null)}
+                              className={`rounded-full border px-[16px] py-[9px] text-[14px] ${interactiveButtonClassName} ${
+                                !editingPersona ? 'border-[#8C1D40] bg-[#8C1D40] text-white' : 'border-black/10 bg-white text-[#191919]'
+                              }`}
+                              style={{ fontWeight: 'bold' }}
+                            >
+                              {defaultPersonaName}
+                            </button>
+                            {personas.map((persona) => (
                               <button
-                                onClick={() => removeFutureStep(index)}
-                                className={`rounded-full border border-black/10 bg-[#FAFAFA] px-[14px] py-[8px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
+                                key={persona.id}
+                                type="button"
+                                onClick={() => setEditingPersonaId(persona.id)}
+                                className={`rounded-full border px-[16px] py-[9px] text-[14px] ${interactiveButtonClassName} ${
+                                  editingPersona?.id === persona.id
+                                    ? 'border-[#8C1D40] bg-[#8C1D40] text-white'
+                                    : 'border-black/10 bg-white text-[#191919]'
+                                }`}
                                 style={{ fontWeight: 'bold' }}
                               >
-                                Remove step
+                                {persona.name.trim() || 'Untitled persona'}
                               </button>
-                            </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={addPersona}
+                              disabled={personas.length >= MAX_FUTURE_PERSONAS}
+                              className={`inline-flex items-center gap-[6px] rounded-full border border-dashed border-black/30 bg-[#FAFAFA] px-[16px] py-[9px] text-[14px] text-[#191919] ${interactiveButtonClassName} disabled:cursor-not-allowed disabled:opacity-50`}
+                              style={{ fontWeight: 'bold' }}
+                            >
+                              <Plus className="size-[14px]" />
+                              Add persona
+                            </button>
+                            <span className="text-[13px] text-[#767676]">
+                              {personas.length} of {MAX_FUTURE_PERSONAS}
+                            </span>
+                          </div>
 
-                            <label className="grid gap-[8px]">
-                              <FieldLabel>Step label</FieldLabel>
-                              <textarea
-                                value={marker.label}
+                          {editingPersona ? (
+                            <div className="grid gap-[12px] rounded-[14px] border border-black/10 bg-white p-[16px]">
+                              <div className="flex flex-wrap items-end gap-[12px]">
+                                <label className="grid min-w-[220px] flex-1 gap-[8px]">
+                                  <FieldLabel>Persona name</FieldLabel>
+                                  <input
+                                    value={editingPersona.name}
+                                    onChange={(event) => updatePersona(editingPersona.id, (persona) => ({ ...persona, name: event.target.value }))}
+                                    className={mutedInputClassName}
+                                    maxLength={60}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => removePersona(editingPersona.id)}
+                                  className={`rounded-full border border-black/10 bg-[#FAFAFA] px-[14px] py-[10px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
+                                  style={{ fontWeight: 'bold' }}
+                                >
+                                  Delete persona
+                                </button>
+                              </div>
+
+                              <div className="grid gap-[12px]">
+                                <FieldLabel>Stage summaries (leave blank to use the {defaultPersonaName} summary)</FieldLabel>
+                                {draftMap.stages.map((stage, stageIndex) => (
+                                  <label key={stage.id} className="grid gap-[6px]">
+                                    <span className="text-[14px] text-[#191919]" style={{ fontWeight: 'bold' }}>
+                                      {stage.number} {stage.title}
+                                    </span>
+                                    <textarea
+                                      value={editingPersona.summaryOverrides?.[stage.id] ?? ''}
+                                      onChange={(event) =>
+                                        updatePersona(editingPersona.id, (persona) => ({
+                                          ...persona,
+                                          summaryOverrides: { ...persona.summaryOverrides, [stage.id]: event.target.value },
+                                        }))
+                                      }
+                                      rows={3}
+                                      placeholder={draftMap.futureSummaries[stageIndex]?.description ?? ''}
+                                      className={mutedInputClassName}
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <label className="grid max-w-[420px] gap-[8px]">
+                              <FieldLabel>Dropdown name for the main {stateLabels.future.toLowerCase()}</FieldLabel>
+                              <input
+                                value={draftMap.futureDefaultPersonaName ?? ''}
                                 onChange={(event) =>
-                                  updateFutureMarker(index, (currentMarker) => ({
-                                    ...currentMarker,
-                                    label: event.target.value,
-                                  }))
+                                  updateDraftMap((current) => ({ ...current, futureDefaultPersonaName: event.target.value || undefined }))
                                 }
-                                rows={3}
+                                placeholder="Default"
                                 className={mutedInputClassName}
+                                maxLength={60}
                               />
                             </label>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-[14px] leading-[1.5] text-[#767676]">
+                          Off: the {stateLabels.future.toLowerCase()} shows one set of steps. Any personas you have created are kept and come back when you turn this on.
+                        </p>
+                      )}
+                    </div>
+                  </SectionCard>
 
-                            <div className="grid gap-[12px] md:grid-cols-2">
-                              <label className="grid gap-[8px]">
-                                <FieldLabel>Step type</FieldLabel>
-                                <select
-                                  value={getStepType(marker)}
-                                  onChange={(event) =>
-                                    updateFutureMarker(index, (currentMarker) =>
-                                      applyStepType(currentMarker, event.target.value as StepType),
-                                    )
-                                  }
-                                  className={mutedInputClassName}
-                                >
-                                  {stepTypeOptions.map((option) => (
-                                    <option
-                                      key={option.value}
-                                      value={option.value}
-                                      disabled={!features.comparisonModalEnabled && option.value === 'interactive-card'}
-                                    >
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label className="grid gap-[8px]">
-                                <FieldLabel>Stage</FieldLabel>
-                                <select
-                                  value={marker.stageId}
-                                  onChange={(event) =>
-                                    updateFutureMarker(index, (currentMarker) => ({
-                                      ...currentMarker,
-                                      stageId: event.target.value,
-                                    }))
-                                  }
-                                  className={mutedInputClassName}
-                                >
-                                  {draftMap.stages.map((stage) => (
-                                    <option key={stage.id} value={stage.id}>
-                                      {stage.title}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            </div>
-
-                            <div className="grid gap-[12px] md:grid-cols-2">
-                              <label className="grid gap-[8px]">
-                                <FieldLabel>Modal title</FieldLabel>
-                                <input
-                                  value={marker.modalTitle ?? ''}
-                                  onChange={(event) =>
-                                    updateFutureMarker(index, (currentMarker) => ({
-                                      ...currentMarker,
-                                      modalTitle: event.target.value || undefined,
-                                    }))
-                                  }
-                                  className={mutedInputClassName}
-                                />
-                              </label>
-                              <label className="grid gap-[8px]">
-                                <FieldLabel>Step ID</FieldLabel>
-                                <input
-                                  value={marker.id}
-                                  onChange={(event) =>
-                                    updateFutureMarker(index, (currentMarker) => ({
-                                      ...currentMarker,
-                                      id: slugify(event.target.value) || currentMarker.id,
-                                    }))
-                                  }
-                                  className={mutedInputClassName}
-                                />
-                              </label>
-                            </div>
-
-                            <div className="grid gap-[12px] md:grid-cols-2">
-                              <label className="grid gap-[8px]">
-                                <FieldLabel>Before image filename</FieldLabel>
-                                <input
-                                  value={marker.beforeImage ?? ''}
-                                  onChange={(event) =>
-                                    updateFutureMarker(index, (currentMarker) => ({
-                                      ...currentMarker,
-                                      beforeImage: event.target.value || undefined,
-                                    }))
-                                  }
-                                  className={mutedInputClassName}
-                                  disabled={!features.comparisonModalEnabled}
-                                  placeholder={features.comparisonModalEnabled ? 'Filename, URL, or uploaded image data' : 'Enable comparison modal first'}
-                                />
-                              </label>
-                              <label className="grid gap-[8px]">
-                                <FieldLabel>After image filename</FieldLabel>
-                                <input
-                                  value={marker.afterImage ?? ''}
-                                  onChange={(event) =>
-                                    updateFutureMarker(index, (currentMarker) => ({
-                                      ...currentMarker,
-                                      afterImage: event.target.value || undefined,
-                                    }))
-                                  }
-                                  className={mutedInputClassName}
-                                  disabled={!features.comparisonModalEnabled}
-                                  placeholder={features.comparisonModalEnabled ? 'Filename, URL, or uploaded image data' : 'Enable comparison modal first'}
-                                />
-                              </label>
-                            </div>
-
-                            <div className="grid gap-[12px] md:grid-cols-2">
-                              <UploadField
-                                label="Upload before image"
-                                hasValue={Boolean(marker.beforeImage)}
-                                disabled={!features.comparisonModalEnabled}
-                                onChange={(file) => handleFutureImageUpload(index, 'beforeImage', file)}
-                              />
-                              <UploadField
-                                label="Upload after image"
-                                hasValue={Boolean(marker.afterImage)}
-                                disabled={!features.comparisonModalEnabled}
-                                onChange={(file) => handleFutureImageUpload(index, 'afterImage', file)}
-                              />
-                            </div>
-
-                            <div className="grid gap-[12px] md:grid-cols-2">
-                              <div className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[12px] py-[10px] text-[14px] text-[#5f5f5f]">
-                                {marker.beforeImage
-                                  ? 'Before image configured'
-                                  : 'Before image will use a placeholder until one is uploaded'}
-                              </div>
-                              <div className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[12px] py-[10px] text-[14px] text-[#5f5f5f]">
-                                {marker.afterImage
-                                  ? 'After image configured'
-                                  : 'After image will use a placeholder until one is uploaded'}
-                              </div>
-                            </div>
-
-                            <div className="grid gap-[12px] xl:grid-cols-2">
-                              <PlacementEditor
-                                label="Desktop placement"
-                                pct={marker.desktop.pct}
-                                side={marker.desktop.side}
-                                onPctChange={(value) =>
-                                  updateFutureMarker(index, (currentMarker) => ({
-                                    ...currentMarker,
-                                    desktop: {
-                                      ...currentMarker.desktop,
-                                      pct: Number(value) || currentMarker.desktop.pct,
-                                    },
-                                  }))
-                                }
-                                onSideChange={(value) =>
-                                  updateFutureMarker(index, (currentMarker) => ({
-                                    ...currentMarker,
-                                    desktop: { ...currentMarker.desktop, side: value },
-                                  }))
-                                }
-                              />
-                              <PlacementEditor
-                                label="Mobile placement"
-                                pct={marker.mobile.pct}
-                                side={marker.mobile.side}
-                                onPctChange={(value) =>
-                                  updateFutureMarker(index, (currentMarker) => ({
-                                    ...currentMarker,
-                                    mobile: {
-                                      ...currentMarker.mobile,
-                                      pct: Number(value) || currentMarker.mobile.pct,
-                                    },
-                                  }))
-                                }
-                                onSideChange={(value) =>
-                                  updateFutureMarker(index, (currentMarker) => ({
-                                    ...currentMarker,
-                                    mobile: { ...currentMarker.mobile, side: value },
-                                  }))
-                                }
-                              />
-                            </div>
-
-                            <div className="grid gap-[12px] xl:grid-cols-2">
-                              <LabelTuningEditor
-                                label="Desktop label tuning"
-                                fallbackSide={marker.desktop.side}
-                                config={marker.desktopLabel}
-                                onToggleSideOverride={(enabled) =>
-                                  updateLabelConfig('future', index, 'desktopLabel', (config) =>
-                                    buildLabelConfigWithOptionalSide(config, enabled, marker.desktop.side),
-                                  )
-                                }
-                                onSideOverrideChange={(side) =>
-                                  updateLabelConfig('future', index, 'desktopLabel', (config) => ({
-                                    ...(config ?? {}),
-                                    side,
-                                  }))
-                                }
-                                onFieldChange={(field, value) =>
-                                  updateLabelConfig('future', index, 'desktopLabel', (config) =>
-                                    buildLabelConfigPatch(
-                                      desktopSideOverride || field !== 'side'
-                                        ? config
-                                        : { ...(config ?? {}), side: marker.desktop.side },
-                                      field,
-                                      value,
-                                    ),
-                                  )
-                                }
-                                onReset={() =>
-                                  updateFutureMarker(index, (currentMarker) => ({
-                                    ...currentMarker,
-                                    desktopLabel: undefined,
-                                  }))
-                                }
-                              />
-
-                              <LabelTuningEditor
-                                label="Mobile label tuning"
-                                fallbackSide={marker.mobile.side}
-                                config={marker.mobileLabel}
-                                onToggleSideOverride={(enabled) =>
-                                  updateLabelConfig('future', index, 'mobileLabel', (config) =>
-                                    buildLabelConfigWithOptionalSide(config, enabled, marker.mobile.side),
-                                  )
-                                }
-                                onSideOverrideChange={(side) =>
-                                  updateLabelConfig('future', index, 'mobileLabel', (config) => ({
-                                    ...(config ?? {}),
-                                    side,
-                                  }))
-                                }
-                                onFieldChange={(field, value) =>
-                                  updateLabelConfig('future', index, 'mobileLabel', (config) =>
-                                    buildLabelConfigPatch(
-                                      mobileSideOverride || field !== 'side'
-                                        ? config
-                                        : { ...(config ?? {}), side: marker.mobile.side },
-                                      field,
-                                      value,
-                                    ),
-                                  )
-                                }
-                                onReset={() =>
-                                  updateFutureMarker(index, (currentMarker) => ({
-                                    ...currentMarker,
-                                    mobileLabel: undefined,
-                                  }))
-                                }
-                              />
-                            </div>
-                          </div>
-                        </details>
-                      );
-                    })}
-                  </div>
-                </SectionCard>
+                  {editingPersona ? (
+                    <FutureStepsEditor
+                      key={editingPersona.id}
+                      title={`${editingPersona.name.trim() || 'Persona'} steps`}
+                      description="This persona's own steps. They can differ completely from the other versions, including images, stages, and placement."
+                      markers={editingPersona.markers}
+                      onMarkersChange={(updater) =>
+                        updatePersona(editingPersona.id, (persona) => ({ ...persona, markers: updater(persona.markers) }))
+                      }
+                      stages={draftMap.stages}
+                      comparisonModalEnabled={features.comparisonModalEnabled}
+                    />
+                  ) : (
+                    <FutureStepsEditor
+                      key="default-future"
+                      title={`${stateLabels.future} steps${features.futurePersonasEnabled ? ` (${defaultPersonaName})` : ''}`}
+                      description="Future steps support stage assignment, before and after images, and the same shared step types."
+                      markers={draftMap.futureStateMarkers}
+                      onMarkersChange={(updater) =>
+                        updateDraftMap((current) => ({ ...current, futureStateMarkers: updater(current.futureStateMarkers) }))
+                      }
+                      stages={draftMap.stages}
+                      comparisonModalEnabled={features.comparisonModalEnabled}
+                    />
+                  )}
+                </div>
               </TabsContent>
               ) : null}
             </Tabs>

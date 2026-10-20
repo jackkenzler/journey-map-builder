@@ -1,13 +1,17 @@
-import { useOrganization, useOrganizationList, useUser } from '@clerk/clerk-react';
+import { useUser } from '@clerk/clerk-react';
 import { toPng } from 'html-to-image';
 import { ArrowUpRight, Download, PenSquare, Plus, Rocket } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
+import journeyMapBuilderPhone from '../../../assets/journey-map-builder-phone.png';
 import { asuNondegreeProject } from '../../../builder';
 import { getBuilderRole } from '../../../builder/access';
-import { listPublishedJourneyMaps, saveDraftProject } from '../../../builder/draftStorage';
-import { listJourneyMapProjects } from '../../../builder/repository';
-import { hasSupabaseConfig } from '../../../builder/supabase';
+import {
+  importLegacyLocalDrafts,
+  listMyMaps,
+  saveDraftProject,
+  type BuilderMapListItem,
+} from '../../../builder/repository';
 import type { JourneyMapProject } from '../../../builder/types';
 import { JourneyMap } from '../JourneyMap';
 
@@ -20,62 +24,53 @@ function slugify(value: string) {
     .slice(0, 40);
 }
 
-function getOrgSlugFallback(name?: string | null) {
-  return name ? slugify(name) : '';
-}
-
-function doesProjectBelongToOrg(
-  project: JourneyMapProject,
-  org: { id: string; slug: string; name: string },
-) {
-  const projectSlugFallback = getOrgSlugFallback(project.organization.name);
-  const orgSlugFallback = getOrgSlugFallback(org.name);
-
-  return (
-    project.organization.id === org.id ||
-    project.organization.slug === org.slug ||
-    project.organization.slug === orgSlugFallback ||
-    projectSlugFallback === org.slug ||
-    projectSlugFallback === orgSlugFallback
-  );
-}
-
 export function BuilderDashboard() {
   const { user } = useUser();
-  const { organization } = useOrganization();
-  const { userMemberships } = useOrganizationList({ userMemberships: true });
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<JourneyMapProject[]>([]);
+  const [items, setItems] = useState<BuilderMapListItem[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [newMapTitle, setNewMapTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const [isCreatingMap, setIsCreatingMap] = useState(false);
   const [exportProject, setExportProject] = useState<JourneyMapProject | null>(null);
   const [exportingProjectKey, setExportingProjectKey] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const builderRole = getBuilderRole(user);
 
-  const refreshProjects = () => {
-    listJourneyMapProjects().then(setProjects);
-  };
-
   useEffect(() => {
-    refreshProjects();
-  }, []);
+    let cancelled = false;
 
-  const currentOrg = useMemo(
-    () => ({
-      id: organization?.id ?? asuNondegreeProject.organization.id,
-      slug:
-        organization?.slug ??
-        (organization?.name ? slugify(organization.name) : undefined) ??
-        asuNondegreeProject.organization.slug,
-      name: organization?.name ?? asuNondegreeProject.organization.name,
-    }),
-    [organization],
-  );
+    const load = async () => {
+      try {
+        let loaded = await listMyMaps();
+        if (cancelled) return;
+        setItems(loaded);
+
+        // Older versions kept drafts in this browser only. Move them into the account once.
+        const imported = await importLegacyLocalDrafts(new Set(loaded.map((item) => item.project.map.slug)));
+        if (cancelled || imported === 0) return;
+        loaded = await listMyMaps();
+        if (cancelled) return;
+        setItems(loaded);
+        setNotice(
+          `Moved ${imported} draft${imported === 1 ? '' : 's'} from this browser into your account. They are now available on any device.`,
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'Could not load your maps.');
+        setItems((current) => current ?? []);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const starterProject = useMemo<JourneyMapProject>(
     () => ({
-      organization: currentOrg,
       map: {
         ...JSON.parse(JSON.stringify(asuNondegreeProject.map)),
         publishing: {
@@ -84,40 +79,23 @@ export function BuilderDashboard() {
         },
       },
     }),
-    [currentOrg],
+    [],
   );
 
-  const publishedSites = useMemo(
-    () => listPublishedJourneyMaps(),
-    [projects],
-  );
-
-  const projectPool = useMemo(() => {
-    const merged = new Map<string, JourneyMapProject>();
-
-    [...projects, ...publishedSites.map((site) => site.project)].forEach((project) => {
-      merged.set(`${project.organization.slug}:${project.map.slug}`, project);
-    });
-
-    return Array.from(merged.values());
-  }, [projects, publishedSites]);
-
-  const orgScopedProjects = useMemo(
-    () => projectPool.filter((project) => doesProjectBelongToOrg(project, currentOrg)),
-    [currentOrg, projectPool],
-  );
-
-  const displayedProjects = useMemo(() => {
-    if (orgScopedProjects.length > 0) return orgScopedProjects;
-    if (projectPool.length > 0) return projectPool;
-    return [starterProject];
-  }, [orgScopedProjects, projectPool, starterProject]);
-
-  useEffect(() => {
-    if (projectPool.length > 0) return;
-    saveDraftProject(starterProject);
-    refreshProjects();
-  }, [projectPool.length, starterProject]);
+  const isStarterOnly = items !== null && items.length === 0;
+  const displayedItems = useMemo<BuilderMapListItem[]>(() => {
+    if (items === null) return [];
+    if (items.length > 0) return items;
+    return [
+      {
+        project: starterProject,
+        siteSlug: null,
+        publishedAt: null,
+        updatedAt: null,
+        hasUnpublishedChanges: false,
+      },
+    ];
+  }, [items, starterProject]);
 
   useEffect(() => {
     if (!exportProject || !exportRef.current) return;
@@ -156,16 +134,12 @@ export function BuilderDashboard() {
     };
   }, [exportProject]);
 
-  const handleCreateMap = () => {
+  const handleCreateMap = async () => {
     const title = newMapTitle.trim();
-    if (!title) return;
+    if (!title || isCreatingMap) return;
 
     const slugBase = slugify(title) || `journey-map-${Date.now().toString(36)}`;
-    const existingSlugs = new Set(
-      displayedProjects
-        .filter((project) => doesProjectBelongToOrg(project, currentOrg))
-        .map((project) => project.map.slug),
-    );
+    const existingSlugs = new Set((items ?? []).map((item) => item.project.map.slug));
     let slug = slugBase;
     let counter = 2;
 
@@ -176,7 +150,6 @@ export function BuilderDashboard() {
 
     const clonedMap = JSON.parse(JSON.stringify(asuNondegreeProject.map)) as JourneyMapProject['map'];
     const newProject: JourneyMapProject = {
-      organization: currentOrg,
       map: {
         ...clonedMap,
         id: slug,
@@ -193,22 +166,22 @@ export function BuilderDashboard() {
       },
     };
 
-    saveDraftProject(newProject);
-    setProjects((current) => {
-      const merged = new Map<string, JourneyMapProject>();
-      [...current, newProject].forEach((project) => {
-        merged.set(`${project.organization.slug}:${project.map.slug}`, project);
-      });
-      return Array.from(merged.values());
-    });
-    setNewMapTitle('');
-    setCreating(false);
-    refreshProjects();
-    navigate(`/app/orgs/${newProject.organization.slug}/maps/${newProject.map.slug}`);
+    setIsCreatingMap(true);
+    setNotice(null);
+    try {
+      await saveDraftProject(newProject);
+      setNewMapTitle('');
+      setCreating(false);
+      navigate(`/app/maps/${newProject.map.slug}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not create the map.');
+    } finally {
+      setIsCreatingMap(false);
+    }
   };
 
   const handleDownloadPng = (project: JourneyMapProject) => {
-    setExportingProjectKey(`${project.organization.slug}:${project.map.slug}`);
+    setExportingProjectKey(project.map.slug);
     setExportProject(project);
   };
 
@@ -226,29 +199,23 @@ export function BuilderDashboard() {
                 Create and manage multiple journey maps, preview drafts, publish named URLs, and prepare clean exports for presentations and decks.
               </p>
             </div>
-            <Link
-              to="/"
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-full border border-black/10 bg-white px-[16px] py-[10px] text-[14px] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
-              style={{ fontWeight: 'bold' }}
-            >
-              Open preview map
-            </Link>
           </div>
         </div>
 
         <div className="mb-[24px] grid gap-[16px] md:grid-cols-3">
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
-            <p className="mb-[8px] text-[14px] text-[#767676]">Signed in user</p>
+            <p className="mb-[8px] text-[14px] text-[#767676]">Signed in account</p>
             <p className="text-[20px] text-[#191919]" style={{ fontWeight: 'bold' }}>
               {user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? 'Authenticated user'}
             </p>
           </div>
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
-            <p className="mb-[8px] text-[14px] text-[#767676]">Active organization</p>
+            <p className="mb-[8px] text-[14px] text-[#767676]">Your maps</p>
             <p className="text-[20px] text-[#191919]" style={{ fontWeight: 'bold' }}>
-              {organization?.name ?? 'No active organization selected'}
+              Create, edit, publish, and export
+            </p>
+            <p className="mt-[6px] text-[14px] leading-[1.5] text-[#767676]">
+              Everything in this builder is centered around your map library rather than a workspace setup.
             </p>
           </div>
           <div className="rounded-[16px] border border-black/10 bg-white p-[20px]">
@@ -262,66 +229,73 @@ export function BuilderDashboard() {
                 : 'Can create, edit, publish, and export journey maps.'}
             </p>
           </div>
-          <div className="rounded-[16px] border border-black/10 bg-white p-[20px] md:col-span-3">
-            <p className="mb-[8px] text-[14px] text-[#767676]">Persistence</p>
-            <p className="text-[20px] text-[#191919]" style={{ fontWeight: 'bold' }}>
-              {hasSupabaseConfig ? 'Supabase configured' : 'Local draft registry'}
-            </p>
-          </div>
         </div>
 
-        <div className="mb-[24px] rounded-[20px] border border-black/10 bg-white p-[20px] shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
-          <div className="flex flex-wrap items-start justify-between gap-[16px]">
-            <div className="max-w-[700px]">
-              <p className="mb-[8px] text-[24px] text-[#191919]" style={{ fontWeight: 'bold' }}>Create a new journey map</p>
-              <p className="text-[16px] leading-[1.5] text-[#5f5f5f]">
+        <div className="relative mb-[24px] overflow-hidden rounded-[28px] border border-[#6F1534] bg-[#8C1D40] px-[24px] pb-0 pt-[24px] shadow-[0_24px_60px_rgba(82,14,36,0.26)] md:px-[36px] md:pb-0 md:pt-[32px]">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 opacity-100"
+            style={{
+              background:
+                'radial-gradient(circle at 18% 18%, rgba(255,198,39,0.18), transparent 26%), radial-gradient(circle at 82% 20%, rgba(255,255,255,0.1), transparent 24%), linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.01))',
+            }}
+          />
+          <div className="relative grid items-center gap-[28px] lg:grid-cols-[minmax(0,1.15fr)_360px]">
+            <div className="max-w-[760px]">
+              <p className="mb-[10px] text-[14px] tracking-[0.02em] text-[#FFD66E]" style={{ fontWeight: 'bold' }}>
+                Start from a flexible template
+              </p>
+              <h2 className="mb-[12px] max-w-[620px] text-[36px] leading-[1.05] tracking-[-1.2px] text-white" style={{ fontWeight: 'bold' }}>
+                Create a new journey map in minutes.
+              </h2>
+              <p className="max-w-[700px] text-[20px] leading-[1.5] text-[#F6EAF0]">
                 Start from the current template and customize content, states, steps, publishing URL, and exports for a new audience or project.
               </p>
-            </div>
-            <button
-              onClick={() => setCreating((value) => !value)}
-              className="inline-flex items-center gap-[8px] rounded-full bg-[#8C1D40] px-[18px] py-[10px] text-[14px] text-white transition-all duration-150 hover:bg-[#7a1938] active:scale-[0.98] cursor-pointer"
-              style={{ fontWeight: 'bold' }}
-            >
-              <Plus className="size-[16px]" />
-              {creating ? 'Close' : 'New map'}
-            </button>
-          </div>
 
-          {creating && (
-            <div className="mt-[16px] grid gap-[12px] md:grid-cols-[1fr_auto]">
-              <input
-                value={newMapTitle}
-                onChange={(event) => setNewMapTitle(event.target.value)}
-                placeholder="Enter a new map title"
-                className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[14px] py-[12px] text-[16px] text-[#191919] outline-none"
-              />
-              <button
-                onClick={handleCreateMap}
-                className="rounded-[12px] border border-black/10 bg-white px-[18px] py-[12px] text-[14px] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer"
-                style={{ fontWeight: 'bold' }}
-              >
-                Create map
-              </button>
-            </div>
-          )}
-        </div>
-
-        {userMemberships.data && userMemberships.data.length > 0 && (
-          <div className="mb-[24px] rounded-[16px] bg-white p-[16px]">
-            <p className="mb-[8px] text-[14px] text-[#767676]">Organization memberships</p>
-            <div className="flex flex-wrap gap-[8px]">
-              {userMemberships.data.map((membership) => (
-                <div
-                  key={membership.organization.id}
-                  className="rounded-full border border-black/10 bg-[#FAFAFA] px-[12px] py-[8px] text-[14px] text-[#191919]"
+              <div className="mt-[24px] flex flex-wrap items-center gap-[12px]">
+                <button
+                  onClick={() => setCreating((value) => !value)}
+                  className="inline-flex items-center gap-[8px] rounded-full bg-white px-[18px] py-[10px] text-[14px] text-[#8C1D40] transition-all duration-150 hover:bg-[#FFF2F6] active:scale-[0.98] cursor-pointer"
+                  style={{ fontWeight: 'bold' }}
                 >
-                  {membership.organization.name}
+                  <Plus className="size-[16px]" />
+                  {creating ? 'Close new map form' : 'New map'}
+                </button>
+                <p className="text-[14px] leading-[1.5] text-[#F3D8E1]">
+                  Use this to spin up a fresh draft and jump straight into the editor.
+                </p>
+              </div>
+
+              {creating && (
+                <div className="mt-[22px] grid gap-[12px] md:max-w-[760px] md:grid-cols-[1fr_auto]">
+                  <input
+                    value={newMapTitle}
+                    onChange={(event) => setNewMapTitle(event.target.value)}
+                    placeholder="Enter a new map title"
+                    className="rounded-[14px] border border-white/15 bg-white px-[16px] py-[14px] text-[16px] text-[#191919] outline-none"
+                  />
+                  <button
+                    onClick={handleCreateMap}
+                    disabled={isCreatingMap}
+                    className="rounded-[14px] bg-[#FFC627] px-[22px] py-[14px] text-[14px] text-[#5A1230] transition-all duration-150 hover:bg-[#f0bb25] active:scale-[0.98] cursor-pointer disabled:cursor-wait disabled:opacity-60"
+                    style={{ fontWeight: 'bold' }}
+                  >
+                    {isCreatingMap ? 'Creating...' : 'Create map'}
+                  </button>
                 </div>
-              ))}
+              )}
+            </div>
+
+            <div className="relative hidden min-h-[340px] items-end justify-center self-end lg:flex">
+              <div className="absolute bottom-0 left-[42px] right-[28px] top-[16px] rounded-[32px] bg-[linear-gradient(160deg,rgba(255,255,255,0.1),rgba(255,255,255,0.02))]" />
+              <img
+                src={journeyMapBuilderPhone}
+                alt="Journey Map Builder mobile preview"
+                className="relative z-10 mt-auto max-h-[360px] w-auto translate-y-[10px] drop-shadow-[0_28px_48px_rgba(31,7,17,0.35)]"
+              />
             </div>
           </div>
-        )}
+        </div>
 
         <div className="mb-[12px] flex items-center justify-between gap-[12px]">
           <div>
@@ -329,26 +303,36 @@ export function BuilderDashboard() {
               Your maps
             </p>
             <p className="text-[16px] leading-[1.5] text-[#5f5f5f]">
-              Open a builder draft, preview a public version, or start from the starter template for this organization.
+              Open a draft, visit a public version, or start from the starter template to build something new.
             </p>
           </div>
         </div>
 
+        {notice ? (
+          <p className="mb-[12px] rounded-[12px] border border-black/10 bg-white px-[16px] py-[12px] text-[15px] text-[#191919]">
+            {notice}
+          </p>
+        ) : null}
+        {loadError ? (
+          <p className="mb-[12px] rounded-[12px] border border-[#E4B4B4] bg-[#FFF4F4] px-[16px] py-[12px] text-[15px] text-[#8A1F1F]">
+            {loadError}
+          </p>
+        ) : null}
+        {items === null ? (
+          <p className="rounded-[16px] border border-black/10 bg-white p-[24px] text-[16px] text-[#5f5f5f]">Loading your maps...</p>
+        ) : null}
+
         <div className="grid gap-[16px]">
-          {displayedProjects.map((project) => {
-              const publishedSite = publishedSites.find(
-                (site) =>
-                  site.mapSlug === project.map.slug &&
-                  doesProjectBelongToOrg(site.project, currentOrg),
-              );
-              const previewPath = `/preview/${project.organization.slug}/${project.map.slug}`;
-              const publishedPath = publishedSite ? `/published/${publishedSite.orgSlug}/${publishedSite.siteSlug}` : null;
-              const isStarterTemplate =
-                projectPool.length === 0 && project.map.slug === asuNondegreeProject.map.slug;
+          {displayedItems.map((item) => {
+              const { project } = item;
+              const previewPath = `/preview/${project.map.slug}`;
+              const publishedPath = item.siteSlug ? `/published/${item.siteSlug}` : null;
+              const publishedSite = item.siteSlug ? { siteSlug: item.siteSlug } : null;
+              const isStarterTemplate = isStarterOnly && project.map.slug === asuNondegreeProject.map.slug;
 
               return (
                 <div
-                  key={`${project.organization.slug}-${project.map.slug}`}
+                  key={project.map.slug}
                   className="rounded-[20px] border border-black/10 bg-white p-[20px] shadow-[0_20px_50px_rgba(0,0,0,0.05)]"
                 >
                   <div className="flex flex-col gap-[14px] md:flex-row md:items-start md:justify-between">
@@ -362,7 +346,7 @@ export function BuilderDashboard() {
                       >
                         <Rocket className="size-[14px]" />
                         {publishedSite
-                          ? `Published as /published/${publishedSite.orgSlug}/${publishedSite.siteSlug}`
+                          ? `Published as /published/${publishedSite.siteSlug}${item.hasUnpublishedChanges ? ' (newer draft not published)' : ''}`
                           : isStarterTemplate
                             ? 'Starter template'
                             : 'Draft only'}
@@ -372,10 +356,13 @@ export function BuilderDashboard() {
                       </p>
                       <p className="text-[16px] leading-[1.5] text-[#5f5f5f]">
                         {project.map.stages.length} stages, {project.map.currentStateMarkers.length} {project.map.stateLabels.current.toLowerCase()} steps, {project.map.futureStateMarkers.length} {project.map.stateLabels.future.toLowerCase()} steps
+                        {project.map.features.futurePersonasEnabled && (project.map.futurePersonas?.length ?? 0) > 0
+                          ? `, ${project.map.futurePersonas?.length} persona${project.map.futurePersonas?.length === 1 ? '' : 's'}`
+                          : ''}
                       </p>
                       {isStarterTemplate ? (
                         <p className="text-[14px] leading-[1.5] text-[#767676]">
-                          This starter map is available immediately. Open builder to customize it for {currentOrg.name}.
+                          This starter map is available immediately. Open the editor to customize it.
                         </p>
                       ) : null}
                     </div>
@@ -397,12 +384,12 @@ export function BuilderDashboard() {
                         aria-label="Download PNG"
                         title="Download PNG"
                         className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-full border border-black/10 bg-[#FAFAFA] text-[#191919] transition-all duration-150 hover:bg-[#f0f0f0] active:scale-[0.98] cursor-pointer disabled:cursor-wait disabled:opacity-70"
-                        disabled={exportingProjectKey === `${project.organization.slug}:${project.map.slug}`}
+                        disabled={exportingProjectKey === project.map.slug}
                       >
                         <Download className="size-[18px]" />
                       </button>
                       <Link
-                        to={`/app/orgs/${project.organization.slug}/maps/${project.map.slug}`}
+                        to={`/app/maps/${project.map.slug}`}
                         className="inline-flex items-center gap-[8px] rounded-full bg-[#8C1D40] px-[18px] py-[10px] text-[14px] text-white transition-all duration-150 hover:bg-[#7a1938] active:scale-[0.98] cursor-pointer"
                         style={{ fontWeight: 'bold' }}
                       >

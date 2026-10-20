@@ -1,136 +1,58 @@
 import type { JourneyMapProject } from './types';
 
+// Drafts and published maps used to live in this browser's localStorage. They now live in
+// Supabase so they are available on every device. This file only reads the old data so it
+// can be moved to the cloud once, then removes it.
+
 const draftIndexStorageKey = 'journey-map-draft-index';
+const draftKeyPrefix = 'journey-map-draft:';
 const publishedSitesStorageKey = 'journey-map-published-sites';
 
-export interface PublishedJourneyMapSnapshot {
-  id: string;
-  orgSlug: string;
-  orgName: string;
-  mapSlug: string;
-  mapTitle: string;
+interface LegacyPublishedSnapshot {
   siteSlug: string;
-  publishedAt: string;
+  mapSlug: string;
   project: JourneyMapProject;
 }
 
-function getDraftStorageKey(orgSlug: string, mapSlug: string) {
-  return `journey-map-draft:${orgSlug}:${mapSlug}`;
+export interface LegacyLocalData {
+  projects: JourneyMapProject[];
+  clear: () => void;
 }
 
-function loadDraftIndex(): Array<{ orgSlug: string; mapSlug: string }> {
-  if (typeof window === 'undefined') return [];
-
+function readJson<T>(key: string): T | null {
   try {
-    const raw = window.localStorage.getItem(draftIndexStorageKey);
-    if (!raw) return [];
-    return JSON.parse(raw) as Array<{ orgSlug: string; mapSlug: string }>;
-  } catch {
-    return [];
-  }
-}
-
-function saveDraftIndex(index: Array<{ orgSlug: string; mapSlug: string }>) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(draftIndexStorageKey, JSON.stringify(index));
-}
-
-function upsertDraftIndex(orgSlug: string, mapSlug: string) {
-  const index = loadDraftIndex().filter((item) => !(item.orgSlug === orgSlug && item.mapSlug === mapSlug));
-  index.unshift({ orgSlug, mapSlug });
-  saveDraftIndex(index);
-}
-
-function removeDraftIndex(orgSlug: string, mapSlug: string) {
-  const index = loadDraftIndex().filter((item) => !(item.orgSlug === orgSlug && item.mapSlug === mapSlug));
-  saveDraftIndex(index);
-}
-
-export function loadDraftProject(orgSlug: string, mapSlug: string): JourneyMapProject | null {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const raw = window.localStorage.getItem(getDraftStorageKey(orgSlug, mapSlug));
-    if (!raw) return null;
-    return JSON.parse(raw) as JourneyMapProject;
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
   }
 }
 
-export function listDraftProjects(): JourneyMapProject[] {
-  return loadDraftIndex()
-    .map((item) => loadDraftProject(item.orgSlug, item.mapSlug))
-    .filter((project): project is JourneyMapProject => Boolean(project));
-}
+export function readLegacyLocalData(): LegacyLocalData | null {
+  if (typeof window === 'undefined') return null;
 
-export function saveDraftProject(project: JourneyMapProject) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(
-    getDraftStorageKey(project.organization.slug, project.map.slug),
-    JSON.stringify(project),
-  );
-  upsertDraftIndex(project.organization.slug, project.map.slug);
-}
+  const index = readJson<string[]>(draftIndexStorageKey) ?? [];
+  const published = readJson<LegacyPublishedSnapshot[]>(publishedSitesStorageKey) ?? [];
 
-export function clearDraftProject(orgSlug: string, mapSlug: string) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(getDraftStorageKey(orgSlug, mapSlug));
-  removeDraftIndex(orgSlug, mapSlug);
-}
+  const projects = new Map<string, JourneyMapProject>();
+  index.forEach((slug) => {
+    const project = readJson<JourneyMapProject>(`${draftKeyPrefix}${slug}`);
+    if (project?.map) projects.set(project.map.slug, project);
+  });
+  published.forEach((snapshot) => {
+    if (snapshot.project?.map && !projects.has(snapshot.project.map.slug)) {
+      projects.set(snapshot.project.map.slug, snapshot.project);
+    }
+  });
 
-function loadPublishedSites(): PublishedJourneyMapSnapshot[] {
-  if (typeof window === 'undefined') return [];
+  if (projects.size === 0) return null;
 
-  try {
-    const raw = window.localStorage.getItem(publishedSitesStorageKey);
-    if (!raw) return [];
-    return JSON.parse(raw) as PublishedJourneyMapSnapshot[];
-  } catch {
-    return [];
-  }
-}
-
-function savePublishedSites(sites: PublishedJourneyMapSnapshot[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(publishedSitesStorageKey, JSON.stringify(sites));
-}
-
-export function listPublishedJourneyMaps(orgSlug?: string) {
-  const sites = loadPublishedSites();
-  return orgSlug ? sites.filter((site) => site.orgSlug === orgSlug) : sites;
-}
-
-export function savePublishedJourneyMap(project: JourneyMapProject, siteSlug: string) {
-  const publishedAt = new Date().toISOString();
-  const snapshot: PublishedJourneyMapSnapshot = {
-    id: `${project.organization.slug}:${siteSlug}`,
-    orgSlug: project.organization.slug,
-    orgName: project.organization.name,
-    mapSlug: project.map.slug,
-    mapTitle: project.map.title,
-    siteSlug,
-    publishedAt,
-    project: {
-      ...project,
-      map: {
-        ...project.map,
-        publishing: {
-          ...project.map.publishing,
-          siteSlug,
-          lastPublishedAt: publishedAt,
-        },
-      },
+  return {
+    projects: Array.from(projects.values()),
+    clear: () => {
+      index.forEach((slug) => window.localStorage.removeItem(`${draftKeyPrefix}${slug}`));
+      window.localStorage.removeItem(draftIndexStorageKey);
+      window.localStorage.removeItem(publishedSitesStorageKey);
     },
   };
-
-  const sites = loadPublishedSites().filter((site) => !(site.orgSlug === snapshot.orgSlug && site.siteSlug === snapshot.siteSlug));
-  sites.unshift(snapshot);
-  savePublishedSites(sites);
-  return snapshot;
-}
-
-export function loadPublishedJourneyMap(orgSlug: string, siteSlug: string): PublishedJourneyMapSnapshot | null {
-  const sites = loadPublishedSites();
-  return sites.find((site) => site.orgSlug === orgSlug && site.siteSlug === siteSlug) ?? null;
 }

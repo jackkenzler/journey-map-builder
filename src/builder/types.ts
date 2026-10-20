@@ -69,6 +69,20 @@ export interface FutureStateMarkerConfig extends JourneyMarkerConfig {
   afterImage?: string;
 }
 
+export const MAX_FUTURE_PERSONAS = 10;
+
+/**
+ * An alternate version of the future state for a specific persona. It has its own
+ * steps (and therefore its own images) but shares the map's stages and road.
+ */
+export interface FuturePersonaConfig {
+  id: string;
+  name: string;
+  markers: FutureStateMarkerConfig[];
+  /** Per-stage summary copy that replaces the default future summary, keyed by stage id. */
+  summaryOverrides?: Record<string, string>;
+}
+
 export interface GuidedTourConfig {
   enabled: boolean;
   title: string;
@@ -83,6 +97,8 @@ export interface JourneyMapFeaturesConfig {
   comparisonModalEnabled: boolean;
   guidedTourEnabled: boolean;
   summaryPanelEnabled: boolean;
+  /** Shows a persona dropdown on the future state. Persona data is kept when this is off. */
+  futurePersonasEnabled?: boolean;
 }
 
 export interface JourneyMapStateLabelsConfig {
@@ -110,16 +126,12 @@ export interface JourneyMapConfig {
   futureSummaries: JourneyStageSummaryConfig[];
   currentStateMarkers: CurrentStateMarkerConfig[];
   futureStateMarkers: FutureStateMarkerConfig[];
+  /** Label for the base future state in the persona dropdown. */
+  futureDefaultPersonaName?: string;
+  futurePersonas?: FuturePersonaConfig[];
   guidedTour: GuidedTourConfig;
 }
 
-export interface OrganizationConfig {
-  id: string;
-  slug: string;
-  name: string;
-}
-
 export interface JourneyMapProject {
-  organization: OrganizationConfig;
   map: JourneyMapConfig;
 }

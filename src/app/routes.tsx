@@ -14,8 +14,16 @@ export const router = createBrowserRouter([
     Component: HomeRedirect,
   },
   {
+    path: "/preview/:mapSlug",
+    Component: JourneyMapPreviewPage,
+  },
+  {
     path: "/preview/:orgSlug/:mapSlug",
     Component: JourneyMapPreviewPage,
+  },
+  {
+    path: "/published/:siteSlug",
+    Component: PublishedJourneyMapPage,
   },
   {
     path: "/published/:orgSlug/:siteSlug",
@@ -28,6 +36,10 @@ export const router = createBrowserRouter([
       {
         index: true,
         Component: BuilderDashboard,
+      },
+      {
+        path: "maps/:mapSlug",
+        Component: BuilderMapView,
       },
       {
         path: "orgs/:orgSlug/maps/:mapSlug",

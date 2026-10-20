@@ -2,8 +2,7 @@ import { SignedIn } from '@clerk/clerk-react';
 import { PenSquare } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { loadPublishedJourneyMap } from '../../../builder/draftStorage';
-import { getJourneyMapProject } from '../../../builder/repository';
+import { getJourneyMapProject, getJourneyMapProjectBySlug, getPublishedJourneyMapBySiteSlug } from '../../../builder/repository';
 import type { JourneyMapProject } from '../../../builder/types';
 import { JourneyMap } from '../JourneyMap';
 
@@ -38,7 +37,7 @@ function LoadingState({ label }: { label: string }) {
   );
 }
 
-function MissingState({ title, body }: { title: string; body: string }) {
+function MissingState({ title, body, showBuilderLink = true }: { title: string; body: string; showBuilderLink?: boolean }) {
   return (
     <div className="min-h-screen bg-[#FAFAFA] px-[24px] py-[48px]" style={{ fontFamily: 'Arial, sans-serif' }}>
       <div className="mx-auto max-w-[900px] rounded-[16px] border border-black/10 bg-white p-[24px]">
@@ -46,20 +45,40 @@ function MissingState({ title, body }: { title: string; body: string }) {
           {title}
         </p>
         <p className="mb-[16px] text-[16px] leading-[1.5] text-[#5f5f5f]">{body}</p>
-        <Link to="/app" className="text-[14px] text-[#8C1D40]" style={{ fontWeight: 'bold' }}>
-          Back to builder home
-        </Link>
+        {showBuilderLink ? (
+          <Link to="/app" className="text-[14px] text-[#8C1D40]" style={{ fontWeight: 'bold' }}>
+            Back to builder home
+          </Link>
+        ) : null}
       </div>
     </div>
   );
 }
 
 export function JourneyMapPreviewPage() {
-  const { orgSlug = '', mapSlug = '' } = useParams();
+  const { orgSlug, mapSlug = '' } = useParams();
   const [project, setProject] = useState<JourneyMapProject | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getJourneyMapProject(orgSlug, mapSlug).then(setProject);
+    let cancelled = false;
+    setProject(undefined);
+    setError(null);
+
+    const load = orgSlug ? getJourneyMapProject(orgSlug, mapSlug) : getJourneyMapProjectBySlug(mapSlug);
+    load
+      .then((result) => {
+        if (!cancelled) setProject(result);
+      })
+      .catch((loadError: Error) => {
+        if (cancelled) return;
+        setError(loadError.message);
+        setProject(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [orgSlug, mapSlug]);
 
   if (project === undefined) {
@@ -67,33 +86,63 @@ export function JourneyMapPreviewPage() {
   }
 
   if (!project) {
-    return <MissingState title="Preview not found" body="This journey map preview does not exist yet." />;
+    return (
+      <MissingState
+        title="Preview not found"
+        body={
+          error ??
+          'Previews show your saved draft, so they are only available while signed in to the builder. Share the published link to show this map to others.'
+        }
+      />
+    );
   }
 
   return (
     <>
-      <FloatingBuilderButton href={`/app/orgs/${project.organization.slug}/maps/${project.map.slug}`} />
-      <JourneyMap projectOverride={project} />
+      <FloatingBuilderButton href={`/app/maps/${project.map.slug}`} />
+      <JourneyMap projectOverride={project} syncPersonaToUrl />
     </>
   );
 }
 
 export function PublishedJourneyMapPage() {
-  const { orgSlug = '', siteSlug = '' } = useParams();
+  const { siteSlug = '' } = useParams();
   const [project, setProject] = useState<JourneyMapProject | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const published = loadPublishedJourneyMap(orgSlug, siteSlug);
-    setProject(published?.project ?? null);
-  }, [orgSlug, siteSlug]);
+    let cancelled = false;
+    setProject(undefined);
+    setError(null);
+
+    getPublishedJourneyMapBySiteSlug(siteSlug)
+      .then((result) => {
+        if (!cancelled) setProject(result);
+      })
+      .catch((loadError: Error) => {
+        if (cancelled) return;
+        setError(loadError.message);
+        setProject(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [siteSlug]);
 
   if (project === undefined) {
     return <LoadingState label="Loading published map..." />;
   }
 
   if (!project) {
-    return <MissingState title="Published map not found" body="This published journey map URL does not exist yet." />;
+    return (
+      <MissingState
+        title="Published map not found"
+        body={error ?? 'This published journey map link does not exist, or it has not been published yet.'}
+        showBuilderLink={false}
+      />
+    );
   }
 
-  return <JourneyMap projectOverride={project} />;
+  return <JourneyMap projectOverride={project} syncPersonaToUrl />;
 }
