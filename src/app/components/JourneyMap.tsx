@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import imgLogo from 'figma:asset/ed52d950de27f23ebc18b225e72eff9d85fd6cb6.png';
 import warningIcon from '../../../warningIcon.svg';
@@ -84,9 +84,35 @@ interface SelectedStep {
   afterImg?: string;
 }
 
+export interface MarkerPlacementEdit {
+  state: JourneyState;
+  /** Set when the future state is showing a persona's own steps. */
+  personaId: string | null;
+  index: number;
+  layout: 'desktop' | 'mobile';
+  pct?: number;
+  side?: LabelSide;
+}
+
+const MIN_DRAG_PCT = 0.1;
+const MAX_DRAG_PCT = 0.95;
+const SIDE_OPTIONS: Array<{ side: LabelSide; Icon: typeof ArrowUp }> = [
+  { side: 'above', Icon: ArrowUp },
+  { side: 'below', Icon: ArrowDown },
+  { side: 'left', Icon: ArrowLeft },
+  { side: 'right', Icon: ArrowRight },
+];
+
 interface JourneyMapProps {
   projectOverride?: JourneyMapProject;
   exportMode?: boolean;
+  /**
+   * Turns on editing: step dots can be dragged along the road and clicking one lets you pick
+   * its label side. Every change is reported here; the caller owns the map data.
+   */
+  onPlacementChange?: (edit: MarkerPlacementEdit) => void;
+  /** Forces the desktop or mobile layout instead of following the browser width. */
+  layoutOverride?: 'desktop' | 'mobile';
   /** Keeps the selected persona in the page URL (?persona=) so a specific view can be shared. */
   syncPersonaToUrl?: boolean;
 }
@@ -135,7 +161,14 @@ function getGradientColorStops(colors: string[]) {
   return stops;
 }
 
-export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToUrl = false }: JourneyMapProps = {}) {
+export function JourneyMap({
+  projectOverride,
+  exportMode = false,
+  syncPersonaToUrl = false,
+  onPlacementChange,
+  layoutOverride,
+}: JourneyMapProps = {}) {
+  const editable = Boolean(onPlacementChange) && !exportMode;
   const activeProject = projectOverride ?? asuNondegreeProject;
   const activeMap = useMemo(() => normalizeMapConfig(activeProject.map), [activeProject.map]);
   const [activePersonaId, setActivePersonaId] = useState<string | null>(() => {
@@ -145,7 +178,9 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
   const [journeyState, setJourneyState] = useState<JourneyState>('future');
   const [markersTransitioning, setMarkersTransitioning] = useState(false);
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
-  const [showElements, setShowElements] = useState(exportMode);
+  const [showElements, setShowElements] = useState(exportMode || editable);
+  const [editSelection, setEditSelection] = useState<{ state: JourneyState; index: number } | null>(null);
+  const dragRef = useRef<{ state: JourneyState; index: number; startX: number; startY: number; moved: boolean } | null>(null);
   const [showPopover, setShowPopover] = useState(false);
   const [currentPositions, setCurrentPositions] = useState<ComputedPoint[]>([]);
   const [futurePositions, setFuturePositions] = useState<ComputedPoint[]>([]);
@@ -218,7 +253,7 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
   });
 
   const scaleX = containerWidth / BASE_WIDTH;
-  const isMobileLayout = viewportWidth < MOBILE_BREAKPOINT;
+  const isMobileLayout = layoutOverride ? layoutOverride === 'mobile' : viewportWidth < MOBILE_BREAKPOINT;
   const mobilePaddingX = Math.max(28, Math.min(56, containerWidth * 0.08));
   const mobilePaddingY = 24;
   const mobileTrackHeight = MOBILE_ROAD_HEIGHT;
@@ -317,8 +352,93 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
     { left: x + distance + shiftX, top: y + shiftY, transform: 'translate(0, -50%)' }
   );
 
+  // ── Editing: drag a step along the road and pick its label side ──
+  const [isDraggingMarker, setIsDraggingMarker] = useState(false);
+
+  // Finds the point on the road closest to the pointer, comparing in screen space so the
+  // desktop and mobile mappings (including the first-step nudge) are handled exactly.
+  const findNearestPct = (pointerX: number, pointerY: number, index: number) => {
+    const path = roadRef.current;
+    if (!path) return null;
+
+    const total = path.getTotalLength();
+    const distanceAt = (length: number) => {
+      const point = path.getPointAtLength(length);
+      const placed = getMarkerPosition({ x: point.x, y: point.y }, index);
+      return (placed.x - pointerX) ** 2 + (placed.y - pointerY) ** 2;
+    };
+
+    const coarseSteps = 300;
+    let bestLength = 0;
+    let bestDistance = Infinity;
+    for (let step = 0; step <= coarseSteps; step += 1) {
+      const length = (total * step) / coarseSteps;
+      const distance = distanceAt(length);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestLength = length;
+      }
+    }
+
+    const span = total / coarseSteps;
+    const from = Math.max(0, bestLength - span);
+    const to = Math.min(total, bestLength + span);
+    for (let step = 0; step <= 40; step += 1) {
+      const length = from + ((to - from) * step) / 40;
+      const distance = distanceAt(length);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestLength = length;
+      }
+    }
+
+    const pct = Math.min(MAX_DRAG_PCT, Math.max(MIN_DRAG_PCT, bestLength / total));
+    return Number(pct.toFixed(4));
+  };
+
+  const getEditHandlers = (state: JourneyState, index: number) => ({
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragRef.current = { state, index, startX: event.clientX, startY: event.clientY, moved: false };
+      setEditSelection({ state, index });
+    },
+    onPointerMove: (event: React.PointerEvent<HTMLElement>) => {
+      const drag = dragRef.current;
+      if (!drag || drag.state !== state || drag.index !== index) return;
+      if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+
+      drag.moved = true;
+      setIsDraggingMarker(true);
+      const bounds = containerRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const pct = findNearestPct(event.clientX - bounds.left, event.clientY - bounds.top, index);
+      if (pct === null) return;
+      onPlacementChange?.({
+        state,
+        personaId: activePersona?.id ?? null,
+        index,
+        layout: isMobileLayout ? 'mobile' : 'desktop',
+        pct,
+      });
+    },
+    onPointerUp: (event: React.PointerEvent<HTMLElement>) => {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      dragRef.current = null;
+      setIsDraggingMarker(false);
+    },
+    onPointerCancel: () => {
+      dragRef.current = null;
+      setIsDraggingMarker(false);
+    },
+  });
+
   const handleToggle = (newState: JourneyState) => {
     if (newState === journeyState) return;
+    setEditSelection(null);
     setSelectedStep(null);
     setHighlightedPainPoint(null);
     setMarkersTransitioning(true);
@@ -330,6 +450,7 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
 
   const handlePersonaChange = (personaId: string | null) => {
     if (personaId === (activePersona?.id ?? null)) return;
+    setEditSelection(null);
     setSelectedStep(null);
     setHoveredDot(null);
     setHighlightedPainPoint(null);
@@ -416,7 +537,7 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
 
   // Path draw-in animation
   useEffect(() => {
-    if (exportMode) {
+    if (exportMode || editable) {
       computePositionsRef.current();
       setShowElements(true);
       setShowPopover(false);
@@ -460,7 +581,7 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
 
     const timer = setTimeout(() => requestAnimationFrame(animate), 300);
     return () => clearTimeout(timer);
-  }, [exportMode]);
+  }, [exportMode, editable]);
 
   const markersVisible = showElements && !markersTransitioning;
   const summaryData = journeyState === 'current' ? currentSummaryData : futureSummaryData;
@@ -598,7 +719,8 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
         <div
           ref={containerRef}
           className="relative w-full transition-[height] duration-300 ease-out"
-          style={{ height: isMobileLayout ? mobileMapHeight : DESKTOP_MAP_HEIGHT, marginTop: 0, overflow: 'visible' }}
+          style={{ height: isMobileLayout ? mobileMapHeight : DESKTOP_MAP_HEIGHT, marginTop: 0, overflow: 'visible', ...(editable ? { userSelect: 'none', WebkitUserSelect: 'none' } : {}) }}
+          onPointerDown={editable ? () => setEditSelection(null) : undefined}
         >
           {/* SVG for road only */}
           <svg
@@ -695,6 +817,22 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
                   pointerEvents: 'none',
                 }}
               >
+                {editable && journeyState === 'current' && (
+                  <div
+                    className="absolute rounded-full"
+                    style={{
+                      left: pixelX - (isMobileLayout ? 30 : 34),
+                      top: pixelY - (isMobileLayout ? 30 : 34),
+                      width: isMobileLayout ? 60 : 68,
+                      height: isMobileLayout ? 60 : 68,
+                      pointerEvents: 'auto',
+                      cursor: isDraggingMarker ? 'grabbing' : 'grab',
+                      touchAction: 'none',
+                      background: editSelection?.state === 'current' && editSelection.index === i ? 'rgba(140,29,64,0.08)' : 'transparent',
+                    }}
+                    {...getEditHandlers('current', i)}
+                  />
+                )}
                 {/* Marker icon / dot */}
                 {marker.icon === 'email' ? (
                   <img
@@ -824,11 +962,15 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
                     top: pixelY - (isMobileLayout ? 34 : 40),
                     width: isMobileLayout ? 68 : 80,
                     height: isMobileLayout ? 68 : 80,
-                    background: isHovered ? 'rgba(0,0,0,0.05)' : 'transparent',
+                    background: editable && editSelection?.state === 'future' && editSelection.index === i
+                      ? 'rgba(140,29,64,0.08)'
+                      : isHovered ? 'rgba(0,0,0,0.05)' : 'transparent',
                     transition: 'background 0.2s ease',
+                    ...(editable ? { cursor: isDraggingMarker ? 'grabbing' : 'grab', touchAction: 'none' } : {}),
                   }}
+                  {...(editable ? getEditHandlers('future', i) : {})}
                   onClick={() => {
-                    if (!features.comparisonModalEnabled) return;
+                    if (!features.comparisonModalEnabled || editable) return;
                     setSelectedStep({
                       stageIdx: marker.stageIdx,
                       stepIdx: marker.stepIdx,
@@ -929,11 +1071,11 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
                       transition: 'background 0.2s ease, border 0.2s ease, box-shadow 0.2s ease',
                       whiteSpace: 'pre-line',
                       maxWidth: isMobileLayout ? mobileLabelConfig.maxWidth : 200,
-                      pointerEvents: journeyState === 'future' ? 'auto' : 'none',
+                      pointerEvents: journeyState === 'future' && !editable ? 'auto' : 'none',
                       cursor: journeyState === 'future' ? 'pointer' : 'default',
                     }}
                     onClick={() => {
-                      if (!features.comparisonModalEnabled) return;
+                      if (!features.comparisonModalEnabled || editable) return;
                       setSelectedStep({
                         stageIdx: marker.stageIdx,
                         stepIdx: marker.stepIdx,
@@ -954,6 +1096,77 @@ export function JourneyMap({ projectOverride, exportMode = false, syncPersonaToU
               </div>
             );
           })}
+
+          {/* Edit mode: selection ring and label side picker */}
+          {editable && editSelection && editSelection.state === journeyState && (() => {
+            const isCurrent = journeyState === 'current';
+            const pos = (isCurrent ? currentPositions : futurePositions)[editSelection.index];
+            const marker = isCurrent ? currentStateMarkers[editSelection.index] : futureStateMarkers[editSelection.index];
+            if (!pos || !marker) return null;
+
+            const { x, y } = getMarkerPosition(pos, editSelection.index, journeyState);
+            const activeSide = isCurrent
+              ? getCurrentMobileSide(currentStateMarkers[editSelection.index], editSelection.index, marker.side)
+              : getFutureMobileLabelConfig(futureStateMarkers[editSelection.index], editSelection.index, marker.side).side;
+            const pct = isCurrent
+              ? getCurrentMarkerPct(currentStateMarkers[editSelection.index])
+              : getFutureMarkerPct(futureStateMarkers[editSelection.index]);
+            const showBelow = activeSide === 'above' || y < 110;
+            const popoverLeft = Math.min(Math.max(x, 120), Math.max(120, containerWidth - 120));
+
+            return (
+              <>
+                <div
+                  className="pointer-events-none absolute rounded-full"
+                  style={{ left: x - 26, top: y - 26, width: 52, height: 52, border: '2px dashed #8C1D40', zIndex: 44 }}
+                />
+                {!isDraggingMarker && (
+                  <div
+                    className="absolute rounded-[12px] border border-black/10 bg-white p-[10px] shadow-[0_10px_30px_rgba(0,0,0,0.15)]"
+                    style={{
+                      left: popoverLeft,
+                      top: showBelow ? y + 38 : y - 38,
+                      transform: showBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+                      zIndex: 45,
+                      fontFamily: 'Arial, sans-serif',
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    <p className="mb-[8px] text-center text-[12px] text-[#767676]">
+                      Label side · {Math.round(pct * 100)}% along road
+                    </p>
+                    <div className="flex gap-[6px]">
+                      {SIDE_OPTIONS.map(({ side, Icon }) => (
+                        <button
+                          key={side}
+                          type="button"
+                          aria-label={`Label ${side}`}
+                          title={`Label ${side}`}
+                          onClick={() =>
+                            onPlacementChange?.({
+                              state: journeyState,
+                              personaId: activePersona?.id ?? null,
+                              index: editSelection.index,
+                              layout: isMobileLayout ? 'mobile' : 'desktop',
+                              side,
+                            })
+                          }
+                          className="inline-flex size-[34px] cursor-pointer items-center justify-center rounded-full border transition-colors"
+                          style={{
+                            background: activeSide === side ? '#8C1D40' : '#FAFAFA',
+                            color: activeSide === side ? '#FFFFFF' : '#191919',
+                            borderColor: activeSide === side ? '#8C1D40' : 'rgba(0,0,0,0.12)',
+                          }}
+                        >
+                          <Icon className="size-[16px]" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* Guided Tour Popover — only in Future state, anchored to the guided-tour dot */}
           {features.guidedTourEnabled && activeMap.guidedTour.enabled && !activePersona && futurePositions.length > (isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex) && journeyState === 'future' && (

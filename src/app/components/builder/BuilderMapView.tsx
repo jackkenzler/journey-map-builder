@@ -1,5 +1,5 @@
 import { toPng } from 'html-to-image';
-import { Copy, Download, House, Plus, Upload } from 'lucide-react';
+import { Copy, Download, House, Monitor, Plus, Smartphone, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { uploadMapImage } from '../../../builder/images';
@@ -23,7 +23,7 @@ import {
   type JourneyStageSummaryConfig,
   type LabelSide,
 } from '../../../builder/types';
-import { JourneyMap } from '../JourneyMap';
+import { JourneyMap, type MarkerPlacementEdit } from '../JourneyMap';
 import { Switch } from '../ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
@@ -836,6 +836,7 @@ export function BuilderMapView() {
   const [isExportingPng, setIsExportingPng] = useState(false);
   const [activeStepsTab, setActiveStepsTab] = useState<StateKey>('current');
   const [editingPersonaId, setEditingPersonaId] = useState<string | null>(null);
+  const [previewLayout, setPreviewLayout] = useState<'desktop' | 'mobile'>('desktop');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState('');
@@ -1061,6 +1062,45 @@ export function BuilderMapView() {
       ...current,
       currentStateMarkers: distributeMarkerPlacements(current.currentStateMarkers, 'current'),
     }));
+  };
+
+  // Applies a drag or label-side change made directly on the live preview.
+  const handlePlacementEdit = (edit: MarkerPlacementEdit) => {
+    const apply = <T extends JourneyMarkerConfig>(marker: T): T => {
+      const next: T = {
+        ...marker,
+        [edit.layout]: {
+          ...marker[edit.layout],
+          ...(edit.pct !== undefined ? { pct: edit.pct } : {}),
+          ...(edit.side ? { side: edit.side } : {}),
+        },
+      };
+
+      // A per-layout label side override would hide the change, so clear it.
+      const labelKey: LabelConfigKey = edit.layout === 'desktop' ? 'desktopLabel' : 'mobileLabel';
+      if (edit.side && marker[labelKey]?.side) {
+        const { side: _removed, ...rest } = marker[labelKey]!;
+        next[labelKey] = Object.keys(rest).length > 0 ? rest : undefined;
+      }
+      return next;
+    };
+    const applyAt = <T extends JourneyMarkerConfig>(markers: T[]) =>
+      markers.map((marker, index) => (index === edit.index ? apply(marker) : marker));
+
+    updateDraftMap((current) => {
+      if (edit.state === 'current') {
+        return { ...current, currentStateMarkers: applyAt(current.currentStateMarkers) };
+      }
+      if (edit.personaId) {
+        return {
+          ...current,
+          futurePersonas: (current.futurePersonas ?? []).map((persona) =>
+            persona.id === edit.personaId ? { ...persona, markers: applyAt(persona.markers) } : persona,
+          ),
+        };
+      }
+      return { ...current, futureStateMarkers: applyAt(current.futureStateMarkers) };
+    });
   };
 
   const personas = draftMap?.futurePersonas ?? [];
@@ -2274,10 +2314,40 @@ export function BuilderMapView() {
           <TabsContent value="preview">
             <SectionCard
               title="Live preview"
-              description="This preview uses the same renderer as the public map. Publishing and PNG export both use this draft configuration."
+              description="Drag a step dot along the road to change its path position. Click a dot to choose which side its label sits on. Changes apply to the draft immediately, and publishing and PNG export use it."
+              actions={
+                <div className="inline-flex rounded-full border border-black/10 bg-[#FAFAFA] p-[4px]">
+                  {([
+                    ['desktop', 'Desktop', Monitor],
+                    ['mobile', 'Mobile', Smartphone],
+                  ] as const).map(([value, label, Icon]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setPreviewLayout(value)}
+                      className={`inline-flex items-center gap-[6px] rounded-full px-[14px] py-[7px] text-[14px] ${interactiveButtonClassName} ${
+                        previewLayout === value ? 'bg-[#8C1D40] text-white' : 'text-[#191919]'
+                      }`}
+                      style={{ fontWeight: 'bold' }}
+                    >
+                      <Icon className="size-[15px]" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              }
             >
-              <div className="overflow-hidden rounded-[16px] border border-black/10 bg-white">
-                <JourneyMap projectOverride={previewProject} />
+              <p className="mb-[12px] text-[14px] leading-[1.5] text-[#767676]">
+                You are editing the {previewLayout} placement. Switch to {previewLayout === 'desktop' ? 'Mobile' : 'Desktop'} to adjust the other layout, and use the state toggle in the preview to edit the other state.
+              </p>
+              <div
+                className={`overflow-hidden rounded-[16px] border border-black/10 bg-white ${previewLayout === 'mobile' ? 'mx-auto max-w-[430px]' : ''}`}
+              >
+                <JourneyMap
+                  projectOverride={previewProject}
+                  onPlacementChange={handlePlacementEdit}
+                  layoutOverride={previewLayout}
+                />
               </div>
             </SectionCard>
           </TabsContent>
