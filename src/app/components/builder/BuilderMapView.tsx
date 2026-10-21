@@ -24,6 +24,7 @@ import {
   type LabelSide,
 } from '../../../builder/types';
 import { JourneyMap, type MarkerPlacementEdit } from '../JourneyMap';
+import { RoadGradientEditor } from './RoadGradientEditor';
 import { Switch } from '../ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
@@ -980,6 +981,10 @@ export function BuilderMapView() {
         theme: {
           ...current.theme,
           stageColors: [...current.theme.stageColors, newStage.color],
+          // Give the new last stage the second half of whatever road the last stage had left.
+          gradientTransitions: current.theme.gradientTransitions
+            ? [...current.theme.gradientTransitions, (current.theme.gradientTransitions.at(-1) ?? 0) / 2 + 0.5]
+            : undefined,
         },
       };
     });
@@ -1000,6 +1005,10 @@ export function BuilderMapView() {
         theme: {
           ...current.theme,
           stageColors: current.theme.stageColors.filter((_, stageIndex) => stageIndex !== index),
+          // Removing a stage merges it into its neighbour: drop the fade point on its left edge.
+          gradientTransitions: current.theme.gradientTransitions?.filter(
+            (_, transitionIndex) => transitionIndex !== Math.max(index - 1, 0),
+          ),
         },
         futureStateMarkers: current.futureStateMarkers.map((marker) =>
           marker.stageId === removedStage.id ? { ...marker, stageId: fallbackStageId } : marker,
@@ -1739,7 +1748,23 @@ export function BuilderMapView() {
             </div>
           </TabsContent>
 
-          <TabsContent value="stages">
+          <TabsContent value="stages" className="grid gap-[16px]">
+            <SectionCard
+              title="Road gradient"
+              description="Drag the handles to choose where the road fades from one stage color into the next. Stages don't have to take up equal space."
+            >
+              <RoadGradientEditor
+                stages={draftMap.stages}
+                transitions={draftMap.theme.gradientTransitions}
+                onChange={(gradientTransitions) =>
+                  updateDraftMap((current) => ({
+                    ...current,
+                    theme: { ...current.theme, gradientTransitions },
+                  }))
+                }
+              />
+            </SectionCard>
+
             <SectionCard
               title="Stages"
               description="Add, remove, and rename stages. Each stage also carries a color and summary copy for both states."

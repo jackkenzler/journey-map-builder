@@ -11,6 +11,7 @@ import { comparisonImageAssetsByFilename } from '../data/comparisonImages';
 import type { JourneyMapProject } from '../../builder';
 import { asuNondegreeProject } from '../../builder';
 import { normalizeMapConfig } from '../../builder/normalize';
+import { getGradientColorStops } from '../../builder/gradient';
 
 // The road path — extended well beyond edges so it bleeds off-screen
 const ROAD_PATH = "M-800 438H254.925C327.274 438 385.925 379.349 385.925 307V143.038C385.925 72.8767 442.801 16 512.962 16C583.123 16 640 72.8767 640 143.038V457.203C640 527.231 696.769 584 766.797 584C836.825 584 893.594 527.231 893.594 457.203V253C893.594 180.651 952.245 122 1024.59 122H2100";
@@ -117,50 +118,6 @@ interface JourneyMapProps {
   syncPersonaToUrl?: boolean;
 }
 
-function getGradientTransitionOffsets(colorCount: number) {
-  if (colorCount <= 1) return [1];
-  const defaultOffsets = [0.15, 0.61, 0.69, 0.841505];
-  if (colorCount - 1 <= defaultOffsets.length) {
-    return defaultOffsets.slice(0, colorCount - 1);
-  }
-
-  const start = 0.15;
-  const end = 0.86;
-  const step = (end - start) / (colorCount - 2);
-  return Array.from({ length: colorCount - 1 }, (_, index) =>
-    Number((index === colorCount - 2 ? end : start + step * index).toFixed(6)),
-  );
-}
-
-function getGradientColorStops(colors: string[]) {
-  if (colors.length === 0) return [];
-  if (colors.length === 1) {
-    return [
-      { color: colors[0], offset: 0 },
-      { color: colors[0], offset: 1 },
-    ];
-  }
-
-  const transitions = getGradientTransitionOffsets(colors.length);
-  const blendWindow = 0.028;
-  const stops: Array<{ color: string; offset: number }> = [{ color: colors[0], offset: 0 }];
-
-  colors.forEach((color, index) => {
-    if (index === 0) return;
-
-    const pivot = transitions[index - 1] ?? 1;
-    const prevColor = colors[index - 1];
-    const startBlend = Number(Math.max(0, pivot - blendWindow).toFixed(6));
-    const endBlend = Number(Math.min(1, pivot + blendWindow).toFixed(6));
-
-    stops.push({ color: prevColor, offset: startBlend });
-    stops.push({ color, offset: endBlend });
-  });
-
-  stops.push({ color: colors[colors.length - 1], offset: 1 });
-  return stops;
-}
-
 export function JourneyMap({
   projectOverride,
   exportMode = false,
@@ -199,7 +156,7 @@ export function JourneyMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const stageColors = activeMap.stages.map((stage) => stage.color).filter(Boolean);
   const gradientColors = stageColors.length > 0 ? stageColors : activeMap.theme.stageColors;
-  const gradientColorStops = getGradientColorStops(gradientColors);
+  const gradientColorStops = getGradientColorStops(gradientColors, activeMap.theme.gradientTransitions);
   const stateLabels = activeMap.stateLabels ?? { current: 'Current state', future: 'Future state' };
   const currentSummaryData = activeMap.currentSummaries.map((stage) => ({
     num: stage.number,

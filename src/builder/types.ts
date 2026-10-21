@@ -17,6 +17,11 @@ export interface BuilderThemeConfig {
   pathStrokeWidth: number;
   centerlineStrokeWidth: number;
   stageColors: string[];
+  /**
+   * Where the road color fades into the next stage's color, as fractions (0-1) of the road from
+   * start to end. One value per stage boundary; ignored (defaults used) if the count doesn't match.
+   */
+  gradientTransitions?: number[];
 }
 
 export interface JourneyStageSummaryConfig {
