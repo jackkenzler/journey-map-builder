@@ -1,5 +1,5 @@
 import { toPng } from 'html-to-image';
-import { ChevronDown, ChevronUp, Copy, Download, House, Monitor, Plus, Smartphone, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, GripVertical, Download, House, Monitor, Plus, Smartphone, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { uploadMapImage } from '../../../builder/images';
@@ -265,16 +265,120 @@ function moveMarker<T extends JourneyMarkerConfig>(markers: T[], from: number, t
   }));
 }
 
+type StepDragHandleProps = Pick<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  'onPointerDown' | 'onPointerMove' | 'onPointerUp' | 'onPointerCancel' | 'onKeyDown'
+>;
+
+interface StepListApi {
+  handleProps: (index: number) => StepDragHandleProps;
+  itemStyle: (index: number) => React.CSSProperties;
+}
+
+/**
+ * Wraps a list of steps and lets each one be dragged to a new spot by its handle. While a step
+ * is being dragged every step collapses to its header so the whole list fits on screen.
+ */
+function StepList({
+  count,
+  onMove,
+  children,
+}: {
+  count: number;
+  onMove: (from: number, to: number) => void;
+  children: (api: StepListApi) => React.ReactNode;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<{ from: number; over: number } | null>(null);
+
+  const indexAtPointer = (clientY: number) => {
+    const items = Array.from(listRef.current?.children ?? []) as HTMLElement[];
+    let best = 0;
+    let bestDistance = Infinity;
+    items.forEach((item, index) => {
+      const rect = item.getBoundingClientRect();
+      const distance = Math.abs(clientY - (rect.top + rect.height / 2));
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = index;
+      }
+    });
+    return Math.min(best, count - 1);
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDrag(null);
+    };
+    window.addEventListener('keydown', cancel);
+    return () => window.removeEventListener('keydown', cancel);
+  }, [drag]);
+
+  const api: StepListApi = {
+    handleProps: (index) => ({
+      onPointerDown: (event) => {
+        if (event.button !== 0 || count < 2) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        setDrag({ from: index, over: index });
+      },
+      onPointerMove: (event) => {
+        if (!drag || drag.from !== index) return;
+        const over = indexAtPointer(event.clientY);
+        if (over !== drag.over) setDrag({ from: index, over });
+        // Keep the list moving when the pointer nears the top or bottom of the window.
+        if (event.clientY < 80) window.scrollBy(0, -14);
+        else if (event.clientY > window.innerHeight - 80) window.scrollBy(0, 14);
+      },
+      onPointerUp: (event) => {
+        if (!drag || drag.from !== index) return;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        const to = indexAtPointer(event.clientY);
+        setDrag(null);
+        if (to !== index) onMove(index, to);
+      },
+      onPointerCancel: () => setDrag(null),
+      onKeyDown: (event) => {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        event.preventDefault();
+        const to = index + (event.key === 'ArrowUp' ? -1 : 1);
+        if (to >= 0 && to < count) onMove(index, to);
+      },
+    }),
+    itemStyle: (index) => {
+      if (!drag) return {};
+      if (index === drag.from) return { opacity: 0.45 };
+      if (index !== drag.over) return {};
+      // Show where the dragged step will land: above this one when moving up, below when moving down.
+      return { boxShadow: drag.over < drag.from ? '0 -4px 0 0 #8C1D40' : '0 4px 0 0 #8C1D40' };
+    },
+  };
+
+  return (
+    <div
+      ref={listRef}
+      data-reordering={drag ? 'true' : undefined}
+      className="grid gap-[12px] [&[data-reordering]_details>:not(summary)]:hidden"
+      style={drag ? { cursor: 'grabbing', userSelect: 'none' } : undefined}
+    >
+      {children(api)}
+    </div>
+  );
+}
+
 function StepSummary({
   index,
   count,
   label,
   onMove,
+  dragHandle,
 }: {
   index: number;
   count: number;
   label: string;
   onMove: (to: number) => void;
+  dragHandle: StepDragHandleProps;
 }) {
   const moveButtonClassName = `inline-flex size-[34px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-[#FAFAFA] text-[#191919] ${interactiveButtonClassName} disabled:cursor-not-allowed disabled:opacity-40`;
   // Buttons inside <summary> would also toggle the step open or closed, so stop that.
@@ -289,13 +393,29 @@ function StepSummary({
       className="flex cursor-pointer items-center justify-between gap-[12px] rounded-[8px] text-[18px] text-[#191919] transition-colors hover:bg-black/5 active:bg-black/10"
       style={{ fontWeight: 'bold' }}
     >
-      <span className="min-w-0 truncate">
+      <span className="flex min-w-0 items-center gap-[8px]">
+        <button
+          type="button"
+          aria-label={`Drag to reorder step ${index + 1}. Use the up and down arrow keys to move it.`}
+          title="Drag to reorder"
+          onClick={(event) => {
+            // Releasing a drag over the summary would otherwise count as a click and toggle the step.
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          className="inline-flex size-[34px] shrink-0 cursor-grab touch-none items-center justify-center rounded-full text-[#767676] transition-colors hover:bg-black/5 hover:text-[#191919] active:cursor-grabbing"
+          {...dragHandle}
+        >
+          <GripVertical className="size-[18px]" />
+        </button>
+        <span className="min-w-0 truncate">
         Step {index + 1}
         {label.trim() ? (
           <span className="ml-[10px] text-[15px] text-[#767676]" style={{ fontWeight: 'normal' }}>
             {label.split('\n').join(' ')}
           </span>
         ) : null}
+        </span>
       </span>
       <span className="flex shrink-0 gap-[6px]">
         <button
@@ -650,14 +770,14 @@ function FutureStepsEditor({
           {uploadError}
         </p>
       ) : null}
-      <div className="grid gap-[12px]">
-        {markers.map((marker, index) => {
+      <StepList count={markers.length} onMove={moveStep}>
+        {(reorder) => markers.map((marker, index) => {
           const desktopSideOverride = Boolean(marker.desktopLabel?.side);
           const mobileSideOverride = Boolean(marker.mobileLabel?.side);
 
           return (
-            <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]">
-              <StepSummary index={index} count={markers.length} label={marker.label} onMove={(to) => moveStep(index, to)} />
+            <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]" style={reorder.itemStyle(index)}>
+              <StepSummary index={index} count={markers.length} label={marker.label} onMove={(to) => moveStep(index, to)} dragHandle={reorder.handleProps(index)} />
 
               <div className="mt-[14px] grid gap-[12px]">
                 <div className="flex flex-wrap items-center justify-between gap-[10px]">
@@ -938,7 +1058,7 @@ function FutureStepsEditor({
             </details>
           );
         })}
-      </div>
+      </StepList>
     </SectionCard>
   );
 }
@@ -2087,14 +2207,14 @@ export function BuilderMapView() {
                     </div>
                   }
                 >
-                  <div className="grid gap-[12px]">
-                    {draftMap.currentStateMarkers.map((marker, index) => {
+                  <StepList count={draftMap.currentStateMarkers.length} onMove={moveCurrentStep}>
+                    {(reorder) => draftMap.currentStateMarkers.map((marker, index) => {
                       const desktopSideOverride = Boolean(marker.desktopLabel?.side);
                       const mobileSideOverride = Boolean(marker.mobileLabel?.side);
 
                       return (
-                        <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]">
-                          <StepSummary index={index} count={draftMap.currentStateMarkers.length} label={marker.label} onMove={(to) => moveCurrentStep(index, to)} />
+                        <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]" style={reorder.itemStyle(index)}>
+                          <StepSummary index={index} count={draftMap.currentStateMarkers.length} label={marker.label} onMove={(to) => moveCurrentStep(index, to)} dragHandle={reorder.handleProps(index)} />
 
                           <div className="mt-[14px] grid gap-[12px]">
                             <div className="flex flex-wrap items-center justify-between gap-[10px]">
@@ -2292,7 +2412,7 @@ export function BuilderMapView() {
                         </details>
                       );
                     })}
-                  </div>
+                  </StepList>
                 </SectionCard>
               </TabsContent>
               ) : null}
