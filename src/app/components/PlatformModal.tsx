@@ -127,7 +127,7 @@ export function PlatformModal({
     >
       <div className="absolute inset-0 bg-black/60" />
       <motion.div
-        className="relative bg-white rounded-[12px] shadow-2xl max-w-[848px] w-full overflow-hidden max-h-[calc(100vh-32px)] flex flex-col"
+        className="relative bg-white rounded-[12px] shadow-2xl max-w-[848px] w-full overflow-hidden max-h-[calc(100vh-32px)] flex flex-col lg:max-w-none lg:w-[max(848px,min(1280px,calc(100vw_-_80px),calc((100vh_-_230px)_*_1.5385_+_48px)))]"
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
@@ -157,7 +157,7 @@ export function PlatformModal({
         <div className="p-[16px] md:p-[24px] overflow-y-auto overscroll-contain">
           <div
             ref={containerRef}
-            className="relative w-full h-auto bg-[#fafafa] rounded-[12px] overflow-hidden cursor-ew-resize select-none max-h-[min(52vh,520px)] md:max-h-[min(60vh,520px)]"
+            className="relative w-full h-auto bg-[#fafafa] rounded-[12px] overflow-hidden cursor-ew-resize select-none max-h-[min(52vh,520px)] md:max-h-[min(60vh,520px)] lg:max-h-[max(min(60vh,520px),calc(100vh_-_230px))]"
             style={{
               aspectRatio: `${IMAGE_ASPECT_RATIO}`,
               boxShadow: '0px 5px 8px 0px rgba(0,0,0,0.02), 0px 12px 40px 0px rgba(0,0,0,0.03), 0px 26px 80px 0px rgba(0,0,0,0.08)',
