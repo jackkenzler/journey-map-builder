@@ -405,18 +405,46 @@ export function JourneyMap({
     }, 250);
   };
 
-  const handlePersonaChange = (personaId: string | null) => {
+  const handlePersonaChange = (personaId: string | null, options?: { keepModalOpen?: boolean }) => {
     if (personaId === (activePersona?.id ?? null)) return;
     setEditSelection(null);
-    setSelectedStep(null);
     setHoveredDot(null);
     setHighlightedPainPoint(null);
     setShowPopover(false);
-    setMarkersTransitioning(true);
-    setTimeout(() => {
+
+    if (options?.keepModalOpen && selectedStep) {
+      // Stay in the comparison modal and show the equivalent step from the other persona.
+      const nextConfigs = personaId
+        ? personas.find((persona) => persona.id === personaId)?.markers ?? []
+        : activeMap.futureStateMarkers;
+      const currentStageId = activeMap.stages[selectedStep.stageIdx]?.id;
+      const sameStage = nextConfigs
+        .map((marker, index) => ({ marker, index }))
+        .filter(({ marker }) => marker.stageId === currentStageId);
+      const match = sameStage[selectedStep.stepIdx] ?? sameStage[0] ?? (nextConfigs[0] ? { marker: nextConfigs[0], index: 0 } : null);
+
       setActivePersonaId(personaId);
-      setMarkersTransitioning(false);
-    }, 250);
+      if (match) {
+        const stageIdx = Math.max(0, activeMap.stages.findIndex((stage) => stage.id === match.marker.stageId));
+        setSelectedStep({
+          stageIdx,
+          stepIdx: Math.max(0, sameStage.findIndex((item) => item.index === match.index)),
+          label: match.marker.label.split('\n').join(' '),
+          markerIndex: match.index,
+          beforeImg: resolveConfigImage(match.marker.beforeImage),
+          afterImg: resolveConfigImage(match.marker.afterImage),
+        });
+      } else {
+        setSelectedStep(null);
+      }
+    } else {
+      setSelectedStep(null);
+      setMarkersTransitioning(true);
+      setTimeout(() => {
+        setActivePersonaId(personaId);
+        setMarkersTransitioning(false);
+      }, 250);
+    }
 
     if (syncPersonaToUrl && typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -546,14 +574,18 @@ export function JourneyMap({
   const mobileGuidedTourIndex = Math.max(0, activeMap.futureStateMarkers.findIndex(marker => marker.id === activeMap.guidedTour.mobileAnchorMarkerId));
 
   const showPersonaPicker = journeyState === 'future' && features.futureStateEnabled && personasEnabled;
-  const personaPicker = showPersonaPicker ? (
+  const renderPersonaPicker = (inModal: boolean) => (
     <label className="flex min-w-0 items-center gap-[12px]">
-      <span className={`shrink-0 text-[14px] text-[#767676] ${isMobileLayout ? '' : 'hidden xl:inline'}`}>Persona</span>
+      {!inModal && (
+        <span className={`shrink-0 text-[14px] text-[#767676] ${isMobileLayout ? '' : 'hidden xl:inline'}`}>Persona</span>
+      )}
       <span className="relative block min-w-0 flex-1">
         <select
           value={activePersona?.id ?? ''}
-          onChange={(event) => handlePersonaChange(event.target.value || null)}
-          className="h-[52px] w-full min-w-[170px] max-w-[300px] cursor-pointer appearance-none truncate rounded-full border border-[#D0D0D0] bg-[#FAFAFA] py-[8px] pl-[20px] pr-[48px] text-[16px] text-[#191919] outline-none transition-colors duration-150 hover:bg-[#F0F0F0] focus-visible:ring-2 focus-visible:ring-[#8C1D40]"
+          onChange={(event) => handlePersonaChange(event.target.value || null, { keepModalOpen: inModal })}
+          className={`w-full cursor-pointer appearance-none truncate rounded-full border border-[#D0D0D0] bg-[#FAFAFA] py-[8px] text-[16px] text-[#191919] outline-none transition-colors duration-150 hover:bg-[#F0F0F0] focus-visible:ring-2 focus-visible:ring-[#8C1D40] ${
+            inModal ? 'pl-[16px] pr-[40px] h-[44px] min-w-[120px] max-w-[130px] sm:max-w-[220px] md:h-[52px] md:min-w-[170px]' : 'h-[52px] min-w-[170px] max-w-[300px] pl-[20px] pr-[48px]'
+          }`}
           style={{ fontWeight: 'bold', fontFamily: 'Arial, sans-serif' }}
           aria-label="Choose a persona"
         >
@@ -564,10 +596,11 @@ export function JourneyMap({
             </option>
           ))}
         </select>
-        <ChevronDown className="pointer-events-none absolute right-[18px] top-1/2 size-[18px] -translate-y-1/2 text-[#747474]" />
+        <ChevronDown className="pointer-events-none absolute right-[14px] top-1/2 size-[18px] -translate-y-1/2 text-[#747474]" />
       </span>
     </label>
-  ) : null;
+  );
+  const personaPicker = showPersonaPicker ? renderPersonaPicker(false) : null;
 
   const selectedStage = selectedStep ? journeyStages[selectedStep.stageIdx] : null;
   const selectedPlatform = selectedStage?.platforms[0] || null;
@@ -1192,6 +1225,7 @@ export function JourneyMap({
             onClose={() => setSelectedStep(null)}
             beforeImg={selectedStep.beforeImg}
             afterImg={selectedStep.afterImg}
+            headerExtra={showPersonaPicker ? renderPersonaPicker(true) : undefined}
           />
         )}
       </AnimatePresence>

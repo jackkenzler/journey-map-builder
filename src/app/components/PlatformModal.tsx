@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { X } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { Platform } from '../data/journeyData';
 import svgPaths from '../../imports/svg-gjcu1703xj';
 
@@ -14,6 +14,8 @@ interface PlatformModalProps {
   onClose: () => void;
   beforeImg?: string;
   afterImg?: string;
+  /** Optional control shown in the header, between the title and the close button. */
+  headerExtra?: ReactNode;
 }
 
 function createPlaceholderImage(label: string, accentColor: string) {
@@ -45,6 +47,7 @@ export function PlatformModal({
   onClose,
   beforeImg: beforeImgProp,
   afterImg: afterImgProp,
+  headerExtra,
 }: PlatformModalProps) {
   const IMAGE_ASPECT_RATIO = 1280 / 832;
   const beforeSrc = beforeImgProp || createPlaceholderImage(beforeLabel, '#5C6670');
@@ -131,10 +134,11 @@ export function PlatformModal({
       >
         {/* Header */}
         <div className="border-b border-[#e8e8e8] pb-[12px] pl-[16px] pr-[12px] pt-[12px] md:pb-[17px] md:pl-[24px] md:pr-[16px] md:pt-[16px] flex items-center justify-between shrink-0">
-          <div className="flex flex-col gap-[2px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-[2px]">
             <p className="text-[14px] tracking-[-0.49px]" style={{ color: stageColor, fontWeight: 'bold', fontFamily: 'Arial, sans-serif' }}>{stageName}</p>
             <h2 className="text-[20px] md:text-[24px] text-black tracking-[-0.84px] leading-[28px] md:leading-[36px]" style={{ fontWeight: 'bold', fontFamily: 'Arial, sans-serif' }}>{stepLabel}</h2>
           </div>
+          {headerExtra ? <div className="mx-[8px] shrink-0 md:mx-[16px]">{headerExtra}</div> : null}
           <button
             onClick={onClose}
             className="size-[48px] md:size-[60px] flex items-center justify-center rounded-full hover:bg-[#e8e8e8] active:bg-[#d9d9d9] active:scale-[0.96] transition-all duration-150 cursor-pointer shrink-0"
