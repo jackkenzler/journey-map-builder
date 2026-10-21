@@ -50,6 +50,8 @@ export interface JourneyMarkerLabelConfig {
   side?: LabelSide;
   distance?: number;
   maxWidth?: number;
+  /** Fixed label box width in px. When set it replaces the automatic, content-sized width. */
+  width?: number;
   shiftX?: number;
   shiftY?: number;
 }

@@ -40,6 +40,7 @@ interface MobileFutureLabelConfig {
   side: LabelSide;
   distance?: number;
   maxWidth?: number;
+  width?: number;
   shiftX?: number;
   shiftY?: number;
 }
@@ -93,6 +94,10 @@ export interface MarkerPlacementEdit {
   layout: 'desktop' | 'mobile';
   pct?: number;
   side?: LabelSide;
+  /** New step title (line breaks allowed). */
+  label?: string;
+  /** Fixed label width in px for this layout, or null to go back to automatic width. */
+  width?: number | null;
 }
 
 const MIN_DRAG_PCT = 0.1;
@@ -241,6 +246,7 @@ export function JourneyMap({
         side: marker.desktopLabel?.side ?? defaultSide,
         distance: marker.desktopLabel?.distance ?? LABEL_OFFSET,
         maxWidth: marker.desktopLabel?.maxWidth ?? 200,
+        width: marker.desktopLabel?.width,
         shiftX: marker.desktopLabel?.shiftX ?? 0,
         shiftY: marker.desktopLabel?.shiftY ?? 0,
       };
@@ -251,6 +257,7 @@ export function JourneyMap({
       side: config?.side ?? marker.mobileSide ?? getResponsiveSide(defaultSide, index),
       distance: config?.distance ?? labelOffset,
       maxWidth: config?.maxWidth ?? Math.min(260, containerWidth * 0.56),
+      width: config?.width,
       shiftX: config?.shiftX ?? 0,
       shiftY: config?.shiftY ?? 0,
     };
@@ -837,6 +844,7 @@ export function JourneyMap({
             const side = getCurrentMobileSide(marker, i, marker.side);
             const labelStyle = getLabelStyle(pixelX, pixelY, side);
             const showCardLabel = marker.labelVariant !== 'plain';
+            const fixedWidth = (isMobileLayout ? marker.mobileLabel : marker.desktopLabel)?.width;
             return (
               <div
                 key={`pp-${i}`}
@@ -911,8 +919,9 @@ export function JourneyMap({
                   <div
                     style={{
                       display: 'inline-block',
-                      minWidth: isMobileLayout ? 0 : 150,
-                      maxWidth: isMobileLayout ? Math.min(280, containerWidth * 0.66) : 180,
+                      minWidth: fixedWidth || isMobileLayout ? 0 : 150,
+                      maxWidth: fixedWidth ?? (isMobileLayout ? Math.min(280, containerWidth * 0.66) : 180),
+                      width: fixedWidth,
                       fontFamily: 'Arial, sans-serif',
                       fontSize: 16,
                       color: '#191919',
@@ -1099,7 +1108,8 @@ export function JourneyMap({
                       transform: isLabelPressed ? 'scale(0.95)' : 'scale(1)',
                       transition: 'background 0.2s ease, border 0.2s ease, box-shadow 0.2s ease',
                       whiteSpace: 'pre-line',
-                      maxWidth: isMobileLayout ? mobileLabelConfig.maxWidth : 200,
+                      maxWidth: mobileLabelConfig.width ?? (isMobileLayout ? mobileLabelConfig.maxWidth : 200),
+                      width: mobileLabelConfig.width,
                       pointerEvents: journeyState === 'future' && !editable ? 'auto' : 'none',
                       cursor: journeyState === 'future' ? 'pointer' : 'default',
                     }}
@@ -1140,8 +1150,21 @@ export function JourneyMap({
             const pct = isCurrent
               ? getCurrentMarkerPct(currentStateMarkers[editSelection.index])
               : getFutureMarkerPct(futureStateMarkers[editSelection.index]);
-            const showBelow = activeSide === 'above' || y < 110;
-            const popoverLeft = Math.min(Math.max(x, 120), Math.max(120, containerWidth - 120));
+            const layout = isMobileLayout ? 'mobile' : 'desktop';
+            const fixedWidth = isCurrent
+              ? (isMobileLayout ? currentStateMarkers[editSelection.index].mobileLabel : currentStateMarkers[editSelection.index].desktopLabel)?.width
+              : getFutureMobileLabelConfig(futureStateMarkers[editSelection.index], editSelection.index, marker.side).width;
+            const defaultWidth = isMobileLayout ? Math.round(Math.min(isCurrent ? 280 : 260, containerWidth * (isCurrent ? 0.66 : 0.56))) : isCurrent ? 180 : 200;
+            const showBelow = activeSide === 'above' || y < 260;
+            const popoverLeft = Math.min(Math.max(x, 130), Math.max(130, containerWidth - 130));
+            const emit = (patch: Partial<MarkerPlacementEdit>) =>
+              onPlacementChange?.({
+                state: journeyState,
+                personaId: activePersona?.id ?? null,
+                index: editSelection.index,
+                layout,
+                ...patch,
+              });
 
             return (
               <>
@@ -1151,45 +1174,78 @@ export function JourneyMap({
                 />
                 {!isDraggingMarker && (
                   <div
-                    className="absolute rounded-[12px] border border-black/10 bg-white p-[10px] shadow-[0_10px_30px_rgba(0,0,0,0.15)]"
+                    className="absolute grid w-[248px] gap-[10px] rounded-[12px] border border-black/10 bg-white p-[12px] shadow-[0_10px_30px_rgba(0,0,0,0.15)]"
                     style={{
                       left: popoverLeft,
                       top: showBelow ? y + 38 : y - 38,
                       transform: showBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
                       zIndex: 45,
                       fontFamily: 'Arial, sans-serif',
+                      userSelect: 'text',
+                      WebkitUserSelect: 'text',
                     }}
                     onPointerDown={(event) => event.stopPropagation()}
                   >
-                    <p className="mb-[8px] text-center text-[12px] text-[#767676]">
-                      Label side · {Math.round(pct * 100)}% along road
-                    </p>
-                    <div className="flex gap-[6px]">
-                      {SIDE_OPTIONS.map(({ side, Icon }) => (
-                        <button
-                          key={side}
-                          type="button"
-                          aria-label={`Label ${side}`}
-                          title={`Label ${side}`}
-                          onClick={() =>
-                            onPlacementChange?.({
-                              state: journeyState,
-                              personaId: activePersona?.id ?? null,
-                              index: editSelection.index,
-                              layout: isMobileLayout ? 'mobile' : 'desktop',
-                              side,
-                            })
-                          }
-                          className="inline-flex size-[34px] cursor-pointer items-center justify-center rounded-full border transition-colors"
-                          style={{
-                            background: activeSide === side ? '#8C1D40' : '#FAFAFA',
-                            color: activeSide === side ? '#FFFFFF' : '#191919',
-                            borderColor: activeSide === side ? '#8C1D40' : 'rgba(0,0,0,0.12)',
-                          }}
-                        >
-                          <Icon className="size-[16px]" />
-                        </button>
-                      ))}
+                    <label className="grid gap-[4px]">
+                      <span className="text-[12px] text-[#767676]">Step title</span>
+                      <textarea
+                        value={marker.label}
+                        rows={2}
+                        onChange={(event) => emit({ label: event.target.value })}
+                        className="resize-none rounded-[8px] border border-black/15 bg-[#FAFAFA] px-[8px] py-[6px] text-[14px] leading-[1.3] text-[#191919] outline-none focus-visible:border-[#8C1D40]"
+                      />
+                    </label>
+
+                    <div className="grid gap-[4px]">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="label-width-slider" className="text-[12px] text-[#767676]">
+                          Text width · {fixedWidth ? `${Math.round(fixedWidth)}px` : 'Auto'}
+                        </label>
+                        {fixedWidth ? (
+                          <button
+                            type="button"
+                            onClick={() => emit({ width: null })}
+                            className="cursor-pointer text-[12px] text-[#8C1D40] underline"
+                          >
+                            Reset to auto
+                          </button>
+                        ) : null}
+                      </div>
+                      <input
+                        id="label-width-slider"
+                        type="range"
+                        min={90}
+                        max={isMobileLayout ? Math.max(140, Math.round(containerWidth * 0.9)) : 400}
+                        step={5}
+                        value={fixedWidth ?? defaultWidth}
+                        onChange={(event) => emit({ width: Number(event.target.value) })}
+                        className="w-full cursor-pointer accent-[#8C1D40]"
+                      />
+                    </div>
+
+                    <div className="grid gap-[6px]">
+                      <p className="text-center text-[12px] text-[#767676]">
+                        Label side · {Math.round(pct * 100)}% along road
+                      </p>
+                      <div className="flex justify-center gap-[6px]">
+                        {SIDE_OPTIONS.map(({ side, Icon }) => (
+                          <button
+                            key={side}
+                            type="button"
+                            aria-label={`Label ${side}`}
+                            title={`Label ${side}`}
+                            onClick={() => emit({ side })}
+                            className="inline-flex size-[34px] cursor-pointer items-center justify-center rounded-full border transition-colors"
+                            style={{
+                              background: activeSide === side ? '#8C1D40' : '#FAFAFA',
+                              color: activeSide === side ? '#FFFFFF' : '#191919',
+                              borderColor: activeSide === side ? '#8C1D40' : 'rgba(0,0,0,0.12)',
+                            }}
+                          >
+                            <Icon className="size-[16px]" />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

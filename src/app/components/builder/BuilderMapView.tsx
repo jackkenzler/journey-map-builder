@@ -382,7 +382,7 @@ function LabelTuningEditor({
         </label>
       ) : null}
 
-      <div className="grid gap-[12px] md:grid-cols-2">
+      <div className="grid gap-[12px] md:grid-cols-3">
         <label className="grid gap-[8px]">
           <FieldLabel>Distance</FieldLabel>
           <input
@@ -399,6 +399,15 @@ function LabelTuningEditor({
             onChange={(event) => onFieldChange('maxWidth', event.target.value)}
             className={mutedInputClassName}
             placeholder="240"
+          />
+        </label>
+        <label className="grid gap-[8px]">
+          <FieldLabel>Fixed width</FieldLabel>
+          <input
+            value={config?.width ?? ''}
+            onChange={(event) => onFieldChange('width', event.target.value)}
+            className={mutedInputClassName}
+            placeholder="Auto"
           />
         </label>
       </div>
@@ -1078,6 +1087,7 @@ export function BuilderMapView() {
     const apply = <T extends JourneyMarkerConfig>(marker: T): T => {
       const next: T = {
         ...marker,
+        ...(edit.label !== undefined ? { label: edit.label } : {}),
         [edit.layout]: {
           ...marker[edit.layout],
           ...(edit.pct !== undefined ? { pct: edit.pct } : {}),
@@ -1090,6 +1100,13 @@ export function BuilderMapView() {
       if (edit.side && marker[labelKey]?.side) {
         const { side: _removed, ...rest } = marker[labelKey]!;
         next[labelKey] = Object.keys(rest).length > 0 ? rest : undefined;
+      }
+
+      if (edit.width !== undefined) {
+        const labelConfig = { ...(next[labelKey] ?? {}) };
+        if (edit.width === null) delete labelConfig.width;
+        else labelConfig.width = edit.width;
+        next[labelKey] = Object.keys(labelConfig).length > 0 ? labelConfig : undefined;
       }
       return next;
     };
