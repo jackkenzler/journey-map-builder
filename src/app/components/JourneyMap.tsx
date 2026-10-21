@@ -454,6 +454,41 @@ export function JourneyMap({
     }
   };
 
+  // Left/right arrow keys step through the map's steps while the comparison modal is open.
+  const stepNavigationRef = useRef<(direction: 1 | -1) => void>(() => {});
+  stepNavigationRef.current = (direction) => {
+    if (!selectedStep) return;
+    const pctOf = (marker: FutureStateMarker) => (isMobileLayout ? marker.mobilePct : marker.desktopPct);
+    const order = futureStateMarkers
+      .map((marker, index) => ({ marker, index }))
+      .sort((a, b) => pctOf(a.marker) - pctOf(b.marker) || a.index - b.index);
+    const position = order.findIndex((item) => item.index === selectedStep.markerIndex);
+    const next = order[position + direction];
+    if (position === -1 || !next) return;
+    setSelectedStep({
+      stageIdx: next.marker.stageIdx,
+      stepIdx: next.marker.stepIdx,
+      label: next.marker.label.split('\n').join(' '),
+      markerIndex: next.index,
+      beforeImg: resolveConfigImage(next.marker.beforeImage),
+      afterImg: resolveConfigImage(next.marker.afterImage),
+    });
+  };
+  const isModalOpen = Boolean(selectedStep) && features.comparisonModalEnabled;
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('select, input, textarea, [contenteditable="true"]')) return;
+      event.preventDefault();
+      stepNavigationRef.current(event.key === 'ArrowRight' ? 1 : -1);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isModalOpen]);
+
   // Track container width
   useEffect(() => {
     const el = containerRef.current;
@@ -582,7 +617,11 @@ export function JourneyMap({
       <span className="relative block min-w-0 flex-1">
         <select
           value={activePersona?.id ?? ''}
-          onChange={(event) => handlePersonaChange(event.target.value || null, { keepModalOpen: inModal })}
+          onChange={(event) => {
+            handlePersonaChange(event.target.value || null, { keepModalOpen: inModal });
+            // Hand the arrow keys back to step navigation instead of the select.
+            if (inModal) event.target.blur();
+          }}
           className={`w-full cursor-pointer appearance-none truncate rounded-full border border-[#D0D0D0] bg-[#FAFAFA] py-[8px] text-[16px] text-[#191919] outline-none transition-colors duration-150 hover:bg-[#F0F0F0] focus-visible:ring-2 focus-visible:ring-[#8C1D40] ${
             inModal ? 'pl-[16px] pr-[40px] h-[44px] min-w-[120px] max-w-[130px] sm:max-w-[220px] md:h-[52px] md:min-w-[170px]' : 'h-[52px] min-w-[170px] max-w-[300px] pl-[20px] pr-[48px]'
           }`}
