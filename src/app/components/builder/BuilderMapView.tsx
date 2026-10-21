@@ -1,5 +1,5 @@
 import { toPng } from 'html-to-image';
-import { Copy, Download, House, Monitor, Plus, Smartphone, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Download, House, Monitor, Plus, Smartphone, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { uploadMapImage } from '../../../builder/images';
@@ -236,6 +236,111 @@ function distributeMarkerPlacements<T extends JourneyMarkerConfig>(
       pct: Number((markers.length === 1 ? mobileMid : mobileRange.min + mobileStep * index).toFixed(4)),
     },
   }));
+}
+
+/**
+ * Moves a step to a new position in the list. Road positions (and label tuning) belong to the
+ * step number, not the step, so the moved step takes over the road spot of its new number and
+ * the steps it passes shift one spot over. Label widths stay with the text they were set for.
+ */
+function moveMarker<T extends JourneyMarkerConfig>(markers: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= markers.length || to >= markers.length) return markers;
+
+  const reordered = [...markers];
+  const [moved] = reordered.splice(from, 1);
+  reordered.splice(to, 0, moved);
+
+  const withOwnWidth = (slotLabel: JourneyMarkerLabelConfig | undefined, ownLabel: JourneyMarkerLabelConfig | undefined) => {
+    const { width: _slotWidth, ...rest } = slotLabel ?? {};
+    const next = { ...rest, ...(ownLabel?.width !== undefined ? { width: ownLabel.width } : {}) };
+    return Object.keys(next).length > 0 ? next : undefined;
+  };
+
+  return reordered.map((marker, index) => ({
+    ...marker,
+    desktop: markers[index].desktop,
+    mobile: markers[index].mobile,
+    desktopLabel: withOwnWidth(markers[index].desktopLabel, marker.desktopLabel),
+    mobileLabel: withOwnWidth(markers[index].mobileLabel, marker.mobileLabel),
+  }));
+}
+
+function StepSummary({
+  index,
+  count,
+  label,
+  onMove,
+}: {
+  index: number;
+  count: number;
+  label: string;
+  onMove: (to: number) => void;
+}) {
+  const moveButtonClassName = `inline-flex size-[34px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-[#FAFAFA] text-[#191919] ${interactiveButtonClassName} disabled:cursor-not-allowed disabled:opacity-40`;
+  // Buttons inside <summary> would also toggle the step open or closed, so stop that.
+  const move = (to: number) => (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onMove(to);
+  };
+
+  return (
+    <summary
+      className="flex cursor-pointer items-center justify-between gap-[12px] rounded-[8px] text-[18px] text-[#191919] transition-colors hover:bg-black/5 active:bg-black/10"
+      style={{ fontWeight: 'bold' }}
+    >
+      <span className="min-w-0 truncate">
+        Step {index + 1}
+        {label.trim() ? (
+          <span className="ml-[10px] text-[15px] text-[#767676]" style={{ fontWeight: 'normal' }}>
+            {label.split('\n').join(' ')}
+          </span>
+        ) : null}
+      </span>
+      <span className="flex shrink-0 gap-[6px]">
+        <button
+          type="button"
+          onClick={move(index - 1)}
+          disabled={index === 0}
+          aria-label={`Move step ${index + 1} earlier`}
+          title="Move earlier"
+          className={moveButtonClassName}
+        >
+          <ChevronUp className="size-[18px]" />
+        </button>
+        <button
+          type="button"
+          onClick={move(index + 1)}
+          disabled={index === count - 1}
+          aria-label={`Move step ${index + 1} later`}
+          title="Move later"
+          className={moveButtonClassName}
+        >
+          <ChevronDown className="size-[18px]" />
+        </button>
+      </span>
+    </summary>
+  );
+}
+
+function StepPositionSelect({ index, count, onMove }: { index: number; count: number; onMove: (to: number) => void }) {
+  return (
+    <label className="flex items-center gap-[8px]">
+      <span className="text-[14px] text-[#767676]">Position</span>
+      <select
+        value={index}
+        onChange={(event) => onMove(Number(event.target.value))}
+        className="rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[10px] py-[8px] text-[14px] text-[#191919] outline-none"
+      >
+        {Array.from({ length: count }, (_, position) => (
+          <option key={position} value={position}>
+            {position + 1}
+            {position === 0 ? ' (first)' : position === count - 1 ? ' (last)' : ''}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function createStage(index: number): JourneyStageConfig {
@@ -492,6 +597,10 @@ function FutureStepsEditor({
     });
   };
 
+  const moveStep = (from: number, to: number) => {
+    onMarkersChange((current) => moveMarker(current, from, to));
+  };
+
   const removeStep = (index: number) => {
     onMarkersChange((current) =>
       distributeMarkerPlacements(current.filter((_, markerIndex) => markerIndex !== index), 'future'),
@@ -548,15 +657,11 @@ function FutureStepsEditor({
 
           return (
             <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]">
-              <summary
-                className="cursor-pointer rounded-[8px] text-[18px] text-[#191919] transition-colors hover:bg-black/5 active:bg-black/10"
-                style={{ fontWeight: 'bold' }}
-              >
-                Step {index + 1}
-              </summary>
+              <StepSummary index={index} count={markers.length} label={marker.label} onMove={(to) => moveStep(index, to)} />
 
               <div className="mt-[14px] grid gap-[12px]">
-                <div className="flex justify-end">
+                <div className="flex flex-wrap items-center justify-between gap-[10px]">
+                  <StepPositionSelect index={index} count={markers.length} onMove={(to) => moveStep(index, to)} />
                   <button
                     onClick={() => removeStep(index)}
                     className={`rounded-full border border-black/10 bg-[#FAFAFA] px-[14px] py-[8px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
@@ -1072,6 +1177,13 @@ export function BuilderMapView() {
         current.currentStateMarkers.filter((_, markerIndex) => markerIndex !== index),
         'current',
       ),
+    }));
+  };
+
+  const moveCurrentStep = (from: number, to: number) => {
+    updateDraftMap((current) => ({
+      ...current,
+      currentStateMarkers: moveMarker(current.currentStateMarkers, from, to),
     }));
   };
 
@@ -1982,15 +2094,11 @@ export function BuilderMapView() {
 
                       return (
                         <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]">
-                          <summary
-                            className="cursor-pointer rounded-[8px] text-[18px] text-[#191919] transition-colors hover:bg-black/5 active:bg-black/10"
-                            style={{ fontWeight: 'bold' }}
-                          >
-                            Step {index + 1}
-                          </summary>
+                          <StepSummary index={index} count={draftMap.currentStateMarkers.length} label={marker.label} onMove={(to) => moveCurrentStep(index, to)} />
 
                           <div className="mt-[14px] grid gap-[12px]">
-                            <div className="flex justify-end">
+                            <div className="flex flex-wrap items-center justify-between gap-[10px]">
+                              <StepPositionSelect index={index} count={draftMap.currentStateMarkers.length} onMove={(to) => moveCurrentStep(index, to)} />
                               <button
                                 onClick={() => removeCurrentStep(index)}
                                 className={`rounded-full border border-black/10 bg-[#FAFAFA] px-[14px] py-[8px] text-[14px] text-[#191919] ${interactiveButtonClassName}`}
