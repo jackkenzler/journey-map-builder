@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { X } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { Platform } from '../data/journeyData';
 import svgPaths from '../../imports/svg-gjcu1703xj';
@@ -16,6 +16,8 @@ interface PlatformModalProps {
   afterImg?: string;
   /** Optional control shown in the header, between the title and the close button. */
   headerExtra?: ReactNode;
+  /** Shows a note that the left and right arrow keys move between steps. */
+  showKeyboardHint?: boolean;
 }
 
 function createPlaceholderImage(label: string, accentColor: string) {
@@ -48,6 +50,7 @@ export function PlatformModal({
   beforeImg: beforeImgProp,
   afterImg: afterImgProp,
   headerExtra,
+  showKeyboardHint = false,
 }: PlatformModalProps) {
   const IMAGE_ASPECT_RATIO = 1280 / 832;
   const beforeSrc = beforeImgProp || createPlaceholderImage(beforeLabel, '#5C6670');
@@ -203,6 +206,21 @@ export function PlatformModal({
 
           <div className="flex justify-between items-center mt-[16px]">
             <p className="text-[14px] text-[#191919]" style={{ fontWeight: 'bold' }}>{beforeLabel}</p>
+            {showKeyboardHint ? (
+              <p className="hidden items-center gap-[6px] text-[13px] text-[#6b6b6b] md:flex">
+                <span className="flex items-center gap-[3px]" aria-hidden>
+                  {[ArrowLeft, ArrowRight].map((Icon, index) => (
+                    <kbd
+                      key={index}
+                      className="flex size-[22px] items-center justify-center rounded-[5px] border border-[#d0d0d0] bg-[#fafafa] text-[#191919] shadow-[0_1px_0_rgba(0,0,0,0.08)]"
+                    >
+                      <Icon className="size-[12px]" />
+                    </kbd>
+                  ))}
+                </span>
+                <span>Use the left and right arrow keys to browse steps</span>
+              </p>
+            ) : null}
             <div className="flex items-center gap-[10px]">
               <svg className="size-[16px]" fill="none" viewBox="0 0 17 17">
                 <path d={svgPaths.pd955300} fill="#4A8400" />

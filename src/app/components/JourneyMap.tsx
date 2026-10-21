@@ -1265,6 +1265,7 @@ export function JourneyMap({
             beforeImg={selectedStep.beforeImg}
             afterImg={selectedStep.afterImg}
             headerExtra={showPersonaPicker ? renderPersonaPicker(true) : undefined}
+            showKeyboardHint={futureStateMarkers.length > 1}
           />
         )}
       </AnimatePresence>
