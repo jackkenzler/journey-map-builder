@@ -964,13 +964,15 @@ export function JourneyMap({
             const marker = futureStateMarkers[i];
             if (!marker) return null;
             const lines = marker.label.split('\n');
-            const isHovered = hoveredDot === i;
-            const isCirclePressed = pressedDotCircle === i;
-            const isLabelPressed = pressedDotLabel === i;
+            // Steps that don't open the comparison modal (hidden email images) get no hover or press feedback.
+            const isInteractive = marker.opensModal;
+            const isHovered = isInteractive && hoveredDot === i;
+            const isCirclePressed = isInteractive && pressedDotCircle === i;
+            const isLabelPressed = isInteractive && pressedDotLabel === i;
             const { x: pixelX, y: pixelY } = getMarkerPosition(pos, i, 'future');
             const guidedTourDotIndex = isMobileLayout ? mobileGuidedTourIndex : desktopGuidedTourIndex;
             const isGuidedTourDot = !activePersona && i === guidedTourDotIndex;
-            const showActiveFutureStyle = isMobileLayout || isHovered;
+            const showActiveFutureStyle = isInteractive && (isMobileLayout || isHovered);
 
             const mobileLabelConfig = getFutureMobileLabelConfig(marker, i, marker.side);
             const side = mobileLabelConfig.side;
