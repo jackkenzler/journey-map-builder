@@ -73,6 +73,8 @@ interface FutureStateMarker {
   mobileLabel?: MobileFutureLabelConfig;
   beforeImage?: string;
   afterImage?: string;
+  /** False for email steps whose comparison images are hidden. */
+  opensModal: boolean;
   stageIdx: number;
   stepIdx: number;
 }
@@ -122,6 +124,10 @@ interface JourneyMapProps {
   /** Keeps the selected persona in the page URL (?persona=) so a specific view can be shared. */
   syncPersonaToUrl?: boolean;
 }
+
+// Email steps can hide their comparison images; every other step always has them.
+const stepHasImages = (marker: { icon?: string; showImages?: boolean }) =>
+  marker.icon !== 'email' || marker.showImages !== false;
 
 export function JourneyMap({
   projectOverride,
@@ -210,6 +216,7 @@ export function JourneyMap({
       mobileLabel: marker.mobileLabel,
       beforeImage: marker.beforeImage,
       afterImage: marker.afterImage,
+      opensModal: stepHasImages(marker),
       stageIdx,
       stepIdx,
     };
@@ -426,17 +433,23 @@ export function JourneyMap({
         ? personas.find((persona) => persona.id === personaId)?.markers ?? []
         : activeMap.futureStateMarkers;
       const currentStageId = activeMap.stages[selectedStep.stageIdx]?.id;
-      const sameStage = nextConfigs
+      const inStage = nextConfigs
         .map((marker, index) => ({ marker, index }))
         .filter(({ marker }) => marker.stageId === currentStageId);
-      const match = sameStage[selectedStep.stepIdx] ?? sameStage[0] ?? (nextConfigs[0] ? { marker: nextConfigs[0], index: 0 } : null);
+      const sameOrdinal = inStage[selectedStep.stepIdx];
+      const firstWithImages = nextConfigs.findIndex(stepHasImages);
+      // Prefer the same position in the same stage, skipping steps whose images are hidden.
+      const match =
+        (sameOrdinal && stepHasImages(sameOrdinal.marker) ? sameOrdinal : undefined) ??
+        inStage.find(({ marker }) => stepHasImages(marker)) ??
+        (firstWithImages >= 0 ? { marker: nextConfigs[firstWithImages], index: firstWithImages } : null);
 
       setActivePersonaId(personaId);
       if (match) {
         const stageIdx = Math.max(0, activeMap.stages.findIndex((stage) => stage.id === match.marker.stageId));
         setSelectedStep({
           stageIdx,
-          stepIdx: Math.max(0, sameStage.findIndex((item) => item.index === match.index)),
+          stepIdx: Math.max(0, inStage.findIndex((item) => item.index === match.index)),
           label: match.marker.label.split('\n').join(' '),
           markerIndex: match.index,
           beforeImg: resolveConfigImage(match.marker.beforeImage),
@@ -469,6 +482,7 @@ export function JourneyMap({
     const pctOf = (marker: FutureStateMarker) => (isMobileLayout ? marker.mobilePct : marker.desktopPct);
     const order = futureStateMarkers
       .map((marker, index) => ({ marker, index }))
+      .filter(({ marker }) => marker.opensModal)
       .sort((a, b) => pctOf(a.marker) - pctOf(b.marker) || a.index - b.index);
     const position = order.findIndex((item) => item.index === selectedStep.markerIndex);
     const next = order[position + direction];
@@ -995,7 +1009,7 @@ export function JourneyMap({
                 )}
                 {/* Invisible hit area */}
                 <div
-                  className="absolute cursor-pointer rounded-full"
+                  className={`absolute rounded-full ${marker.opensModal ? 'cursor-pointer' : ''}`}
                   style={{
                     left: pixelX - (isMobileLayout ? 34 : 40),
                     top: pixelY - (isMobileLayout ? 34 : 40),
@@ -1009,7 +1023,7 @@ export function JourneyMap({
                   }}
                   {...(editable ? getEditHandlers('future', i) : {})}
                   onClick={() => {
-                    if (!features.comparisonModalEnabled || editable) return;
+                    if (!features.comparisonModalEnabled || editable || !marker.opensModal) return;
                     setSelectedStep({
                       stageIdx: marker.stageIdx,
                       stepIdx: marker.stepIdx,
@@ -1112,10 +1126,10 @@ export function JourneyMap({
                       maxWidth: mobileLabelConfig.width ?? (isMobileLayout ? mobileLabelConfig.maxWidth : 200),
                       width: mobileLabelConfig.width,
                       pointerEvents: journeyState === 'future' && !editable ? 'auto' : 'none',
-                      cursor: journeyState === 'future' ? 'pointer' : 'default',
+                      cursor: journeyState === 'future' && marker.opensModal ? 'pointer' : 'default',
                     }}
                     onClick={() => {
-                      if (!features.comparisonModalEnabled || editable) return;
+                      if (!features.comparisonModalEnabled || editable || !marker.opensModal) return;
                       setSelectedStep({
                         stageIdx: marker.stageIdx,
                         stepIdx: marker.stepIdx,
@@ -1322,7 +1336,7 @@ export function JourneyMap({
             beforeImg={selectedStep.beforeImg}
             afterImg={selectedStep.afterImg}
             headerExtra={showPersonaPicker ? renderPersonaPicker(true) : undefined}
-            showKeyboardHint={futureStateMarkers.length > 1}
+            showKeyboardHint={futureStateMarkers.filter((marker) => marker.opensModal).length > 1}
           />
         )}
       </AnimatePresence>

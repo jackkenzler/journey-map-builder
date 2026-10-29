@@ -74,6 +74,11 @@ export interface FutureStateMarkerConfig extends JourneyMarkerConfig {
   stageId: string;
   beforeImage?: string;
   afterImage?: string;
+  /**
+   * Email steps only: set to false to hide the comparison images, so the step doesn't open the
+   * comparison modal. Shown by default.
+   */
+  showImages?: boolean;
 }
 
 export const MAX_FUTURE_PERSONAS = 10;

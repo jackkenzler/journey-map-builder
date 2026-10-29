@@ -774,6 +774,8 @@ function FutureStepsEditor({
         {(reorder) => markers.map((marker, index) => {
           const desktopSideOverride = Boolean(marker.desktopLabel?.side);
           const mobileSideOverride = Boolean(marker.mobileLabel?.side);
+          const isEmailStep = getStepType(marker) === 'email';
+          const imagesHidden = isEmailStep && marker.showImages === false;
 
           return (
             <details key={marker.id} open className="rounded-[14px] border border-black/10 bg-white p-[16px]" style={reorder.itemStyle(index)}>
@@ -879,6 +881,26 @@ function FutureStepsEditor({
                   </label>
                 </div>
 
+                {isEmailStep ? (
+                  <label className="flex items-center justify-between gap-[12px] rounded-[12px] border border-black/10 bg-[#FAFAFA] px-[12px] py-[10px]">
+                    <span className="grid gap-[2px]">
+                      <span className="text-[15px] text-[#191919]">Show comparison images</span>
+                      <span className="text-[13px] text-[#767676]">
+                        Turn off to hide this email's images. The step then won't open the comparison modal.
+                      </span>
+                    </span>
+                    <Switch
+                      checked={!imagesHidden}
+                      onCheckedChange={(checked) =>
+                        updateMarker(index, (currentMarker) => ({
+                          ...currentMarker,
+                          showImages: checked ? undefined : false,
+                        }))
+                      }
+                    />
+                  </label>
+                ) : null}
+
                 <div className="grid gap-[12px] md:grid-cols-2">
                   <label className="grid gap-[8px]">
                     <FieldLabel>Before image URL</FieldLabel>
@@ -891,7 +913,7 @@ function FutureStepsEditor({
                         }))
                       }
                       className={mutedInputClassName}
-                      disabled={!comparisonModalEnabled}
+                      disabled={!comparisonModalEnabled || imagesHidden}
                       placeholder={comparisonModalEnabled ? 'Paste an image URL or upload below' : 'Enable comparison modal first'}
                     />
                   </label>
@@ -906,7 +928,7 @@ function FutureStepsEditor({
                         }))
                       }
                       className={mutedInputClassName}
-                      disabled={!comparisonModalEnabled}
+                      disabled={!comparisonModalEnabled || imagesHidden}
                       placeholder={comparisonModalEnabled ? 'Paste an image URL or upload below' : 'Enable comparison modal first'}
                     />
                   </label>
@@ -917,14 +939,14 @@ function FutureStepsEditor({
                     label="Upload before image"
                     hasValue={Boolean(marker.beforeImage)}
                 uploading={uploadingKey === `${index}-beforeImage`}
-                    disabled={!comparisonModalEnabled}
+                    disabled={!comparisonModalEnabled || imagesHidden}
                     onChange={(file) => uploadImage(index, 'beforeImage', file)}
                   />
                   <UploadField
                     label="Upload after image"
                     hasValue={Boolean(marker.afterImage)}
                 uploading={uploadingKey === `${index}-afterImage`}
-                    disabled={!comparisonModalEnabled}
+                    disabled={!comparisonModalEnabled || imagesHidden}
                     onChange={(file) => uploadImage(index, 'afterImage', file)}
                   />
                 </div>
