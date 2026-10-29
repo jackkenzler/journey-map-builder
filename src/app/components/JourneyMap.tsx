@@ -185,7 +185,8 @@ export function JourneyMap({
     label: marker.label,
     side: marker.desktop.side,
     mobileSide: marker.mobile.side,
-    labelVariant: marker.labelVariant ?? 'plain',
+    // Email steps never get a card background or shadow behind their label.
+    labelVariant: marker.icon === 'email' ? 'plain' : (marker.labelVariant ?? 'plain'),
     icon: marker.icon,
     desktopLabel: marker.desktopLabel,
     mobileLabel: marker.mobileLabel,
@@ -203,7 +204,7 @@ export function JourneyMap({
       label: marker.label,
       side: marker.desktop.side,
       mobileSide: marker.mobile.side,
-      labelVariant: marker.labelVariant ?? 'interactive-card',
+      labelVariant: marker.icon === 'email' ? 'plain' : (marker.labelVariant ?? 'interactive-card'),
       icon: marker.icon,
       desktopLabel: marker.desktopLabel,
       mobileLabel: marker.mobileLabel,
